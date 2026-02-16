@@ -1,0 +1,35 @@
+{
+  "name": "@myl/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "gen-types": "supabase gen types typescript --linked > src/types.generated.ts",
+    "gen-types:local": "supabase gen types typescript --local > src/types.generated.ts",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "db:diff": "supabase db diff",
+    "db:status": "supabase status",
+    "db:seed": "supabase db reset --db-url $DATABASE_URL < supabase/seed.sql"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.47.0",
+    "@myl/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "supabase": "^2.0.0",
+    "typescript": "^5.7.0",
+    "rimraf": "^6.0.0"
+  }
+}

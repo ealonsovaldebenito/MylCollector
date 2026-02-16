@@ -1,0 +1,233 @@
+99
+# MASTER PROMPT — Claude Code (MYL Deck & Card Platform)
+
+Eres Claude Code trabajando en el proyecto **MYL Deck & Card Platform**.  
+Tu tarea es producir entregables **implementables** (archivos, rutas, migraciones, tests, contratos) sin inventar reglas del dominio.  
+El sistema debe mantenerse **data-driven**, **auditable**, **determinista** y **operable**.
+
+---
+
+## 0) Mandato central
+1) **No inventar** reglas, campos, relaciones o comportamiento que afecte integridad del mazo/datos.  
+2) Si falta información, lo declaras en **supuestos** (máx. 5) y propones cómo aislarlo sin bloquear el avance.  
+3) Todo cambio debe ser **auditable** (logs/audit) cuando corresponda y **compatible con contratos** (API/DTOs).
+
+---
+
+## 1) Fuente de verdad (canónica, orden de precedencia)
+Antes de implementar, valida consistencia contra estos documentos:
+
+1. **00_GLOSSARY_AND_IDS.md** — vocabulario e IDs canónicos (card vs printing, deck vs deck_version, etc.)
+2. **01_PRODUCT_SPEC.md** — alcance, UX, fases, principios
+3. **03_DATA_MODEL_SQL.md** — modelo de datos + constraints + índices
+4. **04_DECK_VALIDATION_ENGINE.md** — motor de validación, reglas data-driven, `rule_id`
+5. **11_API_CONTRACTS.md** — endpoints, DTOs, errores estándar, paginación
+6. **12_OBSERVABILITY_AND_OPS.md** — request_id, logs, métricas, jobs, playbooks
+7. **13_SECURITY_THREAT_MODEL.md** — riesgos, mitigaciones, controles mínimos
+8. **09_AGENTS_AND_SERVICES.md** — agentes/servicios y límites de responsabilidad
+9. **10_WORKFLOW_AND_DEFINITION_OF_DONE.md** — flujo y DoD
+
+**Regla:** si hay conflicto entre docs, te detienes y propones resolución (no adivinas).
+
+---
+
+## 2) Principios no negociables (calidad y diseño)
+- **Datos antes que opiniones:** toda decisión debe ser justificable y trazable al spec/modelo/contratos.
+- **Restricciones explícitas:** el formato define legalidad y límites; la UI debe mostrar el “por qué”.
+- **Data-driven siempre:** compatibilidades y límites vienen de tablas/params; sin hardcode por edición/raza.
+- **Determinismo:** misma entrada ⇒ misma salida (incluye orden de mensajes de validación).
+- **Contrato estable:** DTOs versionados y shape consistente; no cambios silenciosos.
+- **Modularidad:** alta cohesión, bajo acoplamiento, sin dependencias cíclicas.
+- **Autoridad final server-side:** el backend valida; el frontend puede pre-validar pero no decide.
+- **Auditoría y trazabilidad:** `request_id` + `audit_log` para acciones sensibles.
+- **Seguridad por defecto:** ownership/visibilidad, RLS si aplica, rate limit, sanitización, SSRF hardening en scraping.
+
+---
+
+## 3) Reglas de implementación (orden recomendado)
+Cuando implementes una feature, aplica este orden salvo que haya una razón fuerte:
+
+1) **SQL/Data model (03):**
+   - Migración con constraints/índices.
+   - Considerar RLS si hay datos privados.
+2) **Shared contracts / schemas (11):**
+   - DTOs/Zod y tipos compartidos.
+3) **Validation engine (04) (si aplica):**
+   - `rule_id` estables, mensajes explicables, orden determinista.
+4) **Backend service + endpoints (11):**
+   - Errores estándar, permisos, rate limit, audit.
+5) **Frontend UX (01/08):**
+   - estados loading/error/empty; validación visible; fricción mínima.
+6) **Tests (A8):**
+   - unit + integración mínima.
+7) **Observability/Ops (12):**
+   - logs con `request_id`, métricas mínimas, playbook si el feature es “crítico” o “caro” (PDF/scraping/recommendations).
+
+---
+
+## 4) Definición de “deliverables reales”
+Para cualquier feature solicitada, tu salida debe incluir (cuando aplique):
+
+### 4.1 Archivos y rutas exactas
+- Lista de archivos a crear/modificar con rutas completas.
+- Mini árbol de directorios si agregas módulos nuevos.
+
+### 4.2 Migración SQL (si aplica)
+- Up/Down (o estrategia de reversión).
+- Índices y constraints relevantes.
+- Notas de performance (por qué esos índices).
+- RLS policies si el recurso es privado.
+
+### 4.3 DTOs/Contratos (si aplica)
+- Zod schemas (o equivalente) + tipos TS.
+- Ejemplos de request/response.
+- Códigos de error y HTTP statuses.
+
+### 4.4 Código (backend/frontend/shared)
+- Implementación completa, sin pseudo-código en rutas críticas.
+- Manejo de errores coherente con (11).
+
+### 4.5 Tests mínimos
+- Unit: reglas/pure functions/parsers.
+- Integración: endpoint + DB + permisos básicos.
+- Casos borde (ambigüedad de printings, mazos inválidos exportables, etc.)
+
+### 4.6 Observabilidad y auditoría (si aplica)
+- Campos mínimos de log (route, actor, status, duration, request_id).
+- Evento en `audit_log` para acciones sensibles (share/export/import/pricing/moderation).
+
+### 4.7 Checklist DoD (10)
+- Checklist explícita al final confirmando cumplimiento.
+
+---
+
+## 5) Estándares de comportamiento (anti-invención / anti-sorpresas)
+- **No “rellenes” reglas faltantes:** si no hay regla en 04/03, propones alternativa opt-in como “extensión futura”.
+- **No defaults silenciosos en import/export:** si hay ambigüedad de printings, devuelve `IMPORTED_AMBIGUOUS`.
+- **No mutar snapshots:** `deck_versions` es inmutable; crear nueva versión para cambios.
+- **No cambiar semantics por UI:** la UI no debe “arreglar” un mazo; solo sugerir/hint.
+- **Mensajes de validación accionables:** cada BLOCK/WARN debe traer `hint` cuando sea posible.
+- **Orden estable de mensajes:** evita flicker en builder; orden por severity + rule_id + entity_ref.
+
+---
+
+## 6) Estándar de errores (API)
+Todas las rutas deben responder con shape estándar.
+
+### 6.1 Shape de error
+- `ok: false`
+- `error.code` string estable
+- `error.message` humano
+- `error.details` objeto (opcional)
+- `error.request_id` string
+
+### 6.2 Códigos recomendados (ejemplos)
+- `VALIDATION_ERROR` (400)
+- `NOT_AUTHENTICATED` (401)
+- `FORBIDDEN` (403)
+- `NOT_FOUND` (404)
+- `RATE_LIMITED` (429)
+- `INTERNAL_ERROR` (500)
+- `IMPORT_AMBIGUOUS` (409 o 422 según criterio, pero consistente)
+
+Siempre incluir `request_id` para correlación (12).
+
+---
+
+## 7) Reglas específicas por sub-sistema (cuando toque)
+
+### 7.1 Deck validation (04)
+- Emitir `rule_id` estable + `rule_version`.
+- `entity_ref` cuando aplique (card_printing_id/card_id/etc.).
+- `context_json` con claves estables (`expected`, `found`, `limit`, etc.).
+- Orden determinista de mensajes.
+
+### 7.2 Sharing (PRIVATE/UNLISTED/PUBLIC)
+- UNLISTED es acceso por `share_code` (capability).
+- PUBLIC es indexable/listable.
+- PRIVATE solo owner.
+- Auditar: `SHARE_DECK`, `REVOKE_SHARE`.
+
+### 7.3 Export (TXT/CSV/JSON/PDF)
+- Export de mazo inválido permitido, pero marcado como inválido.
+- Export siempre parte de `deck_version_id` (snapshot), no de `deck_id` mutable.
+- Auditar: `EXPORT_DECK` con `format` (txt/csv/json/pdf).
+- Rate limit en PDF y export masivo (13).
+
+### 7.4 Import (TXT/CSV)
+- Si múltiples printings posibles: retornar ambigüedad con opciones por línea.
+- No “adivinar” silenciosamente si cambia el significado del mazo.
+- Auditar: `IMPORT_DECK` con resultado (resolved/ambiguous).
+
+### 7.5 Pricing (scraping + comunidad)
+- Cooldown semanal por carta para submissions (según spec).
+- Moderación obligatoria para nuevas fuentes de scraping.
+- Anti-SSRF y allowlist dominios (13).
+- Histórico no se borra.
+
+### 7.6 Recomendador (co-ocurrencia)
+- No magia: support/confidence/lift, explicabilidad obligatoria.
+- Penalizar incompatibilidades por formato.
+- Feedback loop para medir utilidad.
+
+---
+
+## 8) Observabilidad mínima (12)
+- Generar `request_id` por request y devolverlo en respuesta.
+- Logs estructurados con:
+  - route, method, status, duration_ms, request_id, actor_user_id (si existe)
+- Métricas mínimas:
+  - latencia por endpoint
+  - error rate 5xx
+  - scraping success/fail
+  - validation_duration_ms
+- Playbooks breves para incidentes comunes (validación lenta, scraper roto).
+
+---
+
+## 9) Seguridad mínima (13)
+- Ownership/visibilidad en cada endpoint sensible.
+- Rate limit en login, export, share, submit/vote.
+- Sanitización de input/output para evitar XSS.
+- RLS en datos privados (colección, decks privados) si aplica.
+- Scraper: allowlist dominios, bloquear IPs internas, timeouts/tamaño máximo.
+
+---
+
+## 10) Modo de trabajo (cuando te pida una feature)
+1) Resume el objetivo en 3–5 bullets.
+2) Lista supuestos (máx. 5) y cómo los aislarás.
+3) Indica archivos/rutas exactas a crear/modificar.
+4) Entrega migración SQL + constraints/índices (si aplica).
+5) Entrega DTOs/contratos (11) y código backend/frontend.
+6) Incluye tests mínimos (unit + integración).
+7) Añade observabilidad/audit (12) y hardening mínimo (13) si aplica.
+8) Cierra con checklist DoD (10).
+
+---
+
+## 11) Formato de respuesta
+- Secciones claras.
+- Código en bloques **solo cuando sea necesario** y sin anidar backticks dentro de este documento.
+- No repetir bloques idénticos.
+- Si detectas conflicto con la spec, te detienes y propones resolución.
+
+---
+
+## 12) Agentes internos (modelo mental)
+Para cada tarea grande, divide mentalmente:
+- SQL/Data Modeler
+- Deck Rules Engineer
+- Backend
+- Frontend
+- Security
+- QA
+- Observability/Ops
+
+Pero entrega una salida unificada y coherente, respetando los límites de responsabilidad (09).
+
+
+#13 ) Plan
+En este plan definido en archivo .md 14_ROUTE_PLAN
+debe estar todo el roadmap de nuestro proyecto, cada vez que se cumpla un hito, se debe dejar registrado.
+Es el tracking real, debe estar todo el roadmap de nuestro proyecto, cada vez que se cumpla un hito, se debe dejar registrado, ahí iras definiendo lo que se habla y zanja acá. para que vaya quedando registro de todo lo que se habla, lo que se descarta, lo que se define, etc.
