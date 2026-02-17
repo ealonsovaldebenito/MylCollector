@@ -140,12 +140,15 @@ export default function AdminPrintingsPage() {
             className="pl-9"
           />
         </div>
-        <Select value={filterEdition} onValueChange={setFilterEdition}>
+        <Select
+          value={filterEdition || '__all__'}
+          onValueChange={(v) => setFilterEdition(v === '__all__' ? '' : v)}
+        >
           <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="Todas las ediciones" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Todas las ediciones</SelectItem>
+            <SelectItem value="__all__">Todas las ediciones</SelectItem>
             {!catalogLoading && editions.map((e) => (
               <SelectItem key={e.edition_id} value={e.edition_id}>
                 {editionDisplayName(e.name)}
@@ -153,12 +156,12 @@ export default function AdminPrintingsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={filterLegal} onValueChange={setFilterLegal}>
+        <Select value={filterLegal || '__all__'} onValueChange={(v) => setFilterLegal(v === '__all__' ? '' : v)}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Estado legal" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Todos</SelectItem>
+            <SelectItem value="__all__">Todos</SelectItem>
             <SelectItem value="LEGAL">Legal</SelectItem>
             <SelectItem value="RESTRICTED">Restringida</SelectItem>
             <SelectItem value="BANNED">Prohibida</SelectItem>

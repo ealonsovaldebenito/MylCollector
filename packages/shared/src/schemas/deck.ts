@@ -15,6 +15,8 @@ export const deckSchema = z.object({
   race_id: z.string().uuid().nullable(),
   name: z.string(),
   description: z.string().nullable(),
+  strategy: z.string().nullable(),
+  cover_image_url: z.string().nullable(),
   visibility: visibilitySchema,
   created_at: z.string(),
   updated_at: z.string(),

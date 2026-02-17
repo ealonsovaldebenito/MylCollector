@@ -1,9 +1,25 @@
+/**
+ * CardForm — Formulario de creación/edición de cartas (admin).
+ * Tabs: Datos, Impresiones, Tiendas.
+ *
+ * Relaciones:
+ *   - cards → card_types, races (FK)
+ *   - cards → tags (many-to-many via card_tags)
+ *   - card_printings → editions, rarity_tiers (FK)
+ *   - store_printing_links → card_printings, stores (FK)
+ *
+ * Changelog:
+ *   2026-02-16 — Creación inicial con tabs y preview sidebar
+ *   2026-02-17 — Fix: eliminar mensajes técnicos visibles en tab Tiendas
+ *   2026-02-17 — UX: mejorar estados vacíos con iconos y mensajes claros
+ */
+
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { CardType, Race, Tag, Block, Edition, RarityTier, CardPrintingWithRelations } from '@myl/shared';
+import type { CardType, Race, Tag, Block, Edition, RarityTier } from '@myl/shared';
 import { createCardSchema, updateCardSchema, editionDisplayName } from '@myl/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +27,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { CardImage } from '@/components/catalog/card-image';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import {
   Loader2,
   Save,
@@ -27,12 +54,18 @@ import {
   Calendar,
   Shield,
   Layers,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Link2,
 } from 'lucide-react';
 import {
   PrintingInlineForm,
   createEmptyPrintingDraft,
   type PrintingDraft,
 } from './printing-inline-form';
+import { CardStoreLinks } from '@/components/admin/card-store-links';
+import type { CardDetail } from '@myl/shared';
 
 interface CardFormData {
   card_id?: string;
@@ -58,13 +91,22 @@ interface CardFormProps {
   races: Race[];
   tags: Tag[];
   mode: 'create' | 'edit';
-  printings?: CardPrintingWithRelations[];
+  printings?: CardDetail['printings'];
   blocks?: Block[];
   editions?: Edition[];
   rarities?: RarityTier[];
 }
 
 const ALIADO_CODE = 'ALIADO';
+
+function formatCLP(value: number): string {
+  return new Intl.NumberFormat('es-CL', {
+    style: 'currency',
+    currency: 'CLP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
 interface SubmissionProgress {
   step: string;
@@ -87,6 +129,12 @@ export function CardForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<SubmissionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [existingPrintings, setExistingPrintings] = useState<CardDetail['printings']>(printings);
+  const [availableTags, setAvailableTags] = useState<Tag[]>(tags);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const [isCreateTagOpen, setIsCreateTagOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [form, setForm] = useState<CardFormData>(
     initialData ?? {
       name: '',
@@ -108,8 +156,43 @@ export function CardForm({
     mode === 'create' ? [createEmptyPrintingDraft()] : [],
   );
 
+  useEffect(() => {
+    setExistingPrintings(printings);
+  }, [printings]);
+
+  useEffect(() => {
+    setAvailableTags(tags);
+  }, [tags]);
+
   const selectedType = cardTypes.find((ct) => ct.card_type_id === form.card_type_id);
   const isAlly = selectedType?.code === ALIADO_CODE;
+
+  const imagePrintings = useMemo(
+    () => existingPrintings.filter((p) => !!p.image_url),
+    [existingPrintings],
+  );
+
+  const printingPriceSummary = useMemo(() => {
+    const prices = existingPrintings
+      .map((p) => (p.price_consensus ? Number((p.price_consensus as { consensus_price: number }).consensus_price) : null))
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    if (prices.length === 0) return null;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    return { min, max, count: prices.length };
+  }, [existingPrintings]);
+
+  const legalCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of existingPrintings) {
+      counts[p.legal_status] = (counts[p.legal_status] ?? 0) + 1;
+    }
+    return counts;
+  }, [existingPrintings]);
+
+  useEffect(() => {
+    if (carouselIndex >= imagePrintings.length) setCarouselIndex(0);
+  }, [carouselIndex, imagePrintings.length]);
 
   function update<K extends keyof CardFormData>(key: K, value: CardFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -134,6 +217,53 @@ export function CardForm({
 
   function removePrintingDraft(index: number) {
     setPrintingDrafts((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function handleDeletePrinting(printingId: string) {
+    if (!form.card_id) return;
+    if (!confirm('¿Eliminar esta impresión? Esta acción no se puede deshacer.')) return;
+
+    try {
+      const res = await fetch(`/api/v1/cards/${form.card_id}/printings/${printingId}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        alert(json.error?.message ?? 'Error al eliminar impresión');
+        return;
+      }
+      setExistingPrintings((prev) => prev.filter((p) => p.card_printing_id !== printingId));
+    } catch {
+      alert('Error de conexión');
+    }
+  }
+
+  async function handleCreateTag() {
+    const name = newTagName.trim();
+    if (!name) return;
+
+    setIsCreatingTag(true);
+    try {
+      const res = await fetch('/api/v1/admin/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        alert(json.error?.message ?? 'Error al crear etiqueta');
+        return;
+      }
+      const tag = json.data.tag as Tag;
+      setAvailableTags((prev) => (prev.some((t) => t.tag_id === tag.tag_id) ? prev : [...prev, tag]));
+      toggleTag(tag.tag_id);
+      setNewTagName('');
+      setIsCreateTagOpen(false);
+    } catch {
+      alert('Error de conexión');
+    } finally {
+      setIsCreatingTag(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -269,9 +399,9 @@ export function CardForm({
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Main Form - Left Column */}
-      <form onSubmit={handleSubmit} className="lg:col-span-2 space-y-6">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      {/* Main Form */}
+      <form onSubmit={handleSubmit} className="space-y-6 lg:col-span-9">
         {error && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive flex items-start gap-2">
             <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
@@ -298,73 +428,106 @@ export function CardForm({
           </div>
         )}
 
-        {/* Metadata Section (Edit Mode) */}
-        {mode === 'edit' && form.card_id && (
-          <div className="rounded-lg border border-border bg-gradient-to-br from-muted/30 to-muted/10 p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Info className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-lg">Informacion del Sistema</h3>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="col-span-full flex items-center justify-between p-3 bg-background rounded-md border">
-                <div className="flex-1">
-                  <Label className="text-xs text-muted-foreground mb-1 block">ID de Carta</Label>
-                  <code className="text-sm font-mono">{form.card_id}</code>
+        <Tabs defaultValue="details" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <TabsList>
+              <TabsTrigger value="details">Datos</TabsTrigger>
+              <TabsTrigger value="printings">
+                Impresiones
+                <span className="ml-2 rounded-md bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {existingPrintings.length}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger value="stores" disabled={mode !== 'edit' || !form.card_id || existingPrintings.length === 0}>
+                Tiendas
+              </TabsTrigger>
+            </TabsList>
+            {mode === 'edit' && form.card_id ? (
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                {printingPriceSummary ? (
+                  <Badge variant="secondary" className="font-mono text-xs">
+                    Consenso: {printingPriceSummary.min.toLocaleString('es-CL')}–{printingPriceSummary.max.toLocaleString('es-CL')}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs">Sin consenso</Badge>
+                )}
+                {Object.keys(legalCounts).length > 0 ? (
+                  <Badge variant="outline" className="text-xs">
+                    Legal: {legalCounts.LEGAL ?? 0} · Res: {legalCounts.RESTRICTED ?? 0} · Ban: {legalCounts.BANNED ?? 0}
+                  </Badge>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <TabsContent value="details" className="space-y-6">
+            {/* Metadata Section (Edit Mode) */}
+            {mode === 'edit' && form.card_id && (
+              <div className="rounded-lg border border-border bg-gradient-to-br from-muted/30 to-muted/10 p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Info className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold text-lg">Informacion del Sistema</h3>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => copyToClipboard(form.card_id!)}
-                  title="Copiar ID"
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="col-span-full flex items-center justify-between p-3 bg-background rounded-md border">
+                    <div className="flex-1">
+                      <Label className="text-xs text-muted-foreground mb-1 block">ID de Carta</Label>
+                      <code className="text-sm font-mono">{form.card_id}</code>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(form.card_id!)}
+                      title="Copiar ID"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {form.name_normalized && (
+                    <div className="p-3 bg-background rounded-md border">
+                      <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                        <Type className="h-3 w-3" />
+                        Nombre Normalizado
+                      </Label>
+                      <code className="text-xs text-muted-foreground">{form.name_normalized}</code>
+                    </div>
+                  )}
+
+                  {form.created_at && (
+                    <div className="p-3 bg-background rounded-md border">
+                      <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        Creacion
+                      </Label>
+                      <p className="text-xs">{new Date(form.created_at).toLocaleString('es-CL')}</p>
+                    </div>
+                  )}
+
+                  {form.updated_at && (
+                    <div className="p-3 bg-background rounded-md border">
+                      <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        Ultima Actualizacion
+                      </Label>
+                      <p className="text-xs">{new Date(form.updated_at).toLocaleString('es-CL')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Basic Info Section */}
+            <div className="rounded-lg border border-border bg-card p-6 space-y-5">
+              <div className="flex items-center gap-2 pb-2">
+                <Type className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-lg">Informacion Basica</h3>
               </div>
 
-              {form.name_normalized && (
-                <div className="p-3 bg-background rounded-md border">
-                  <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    <Type className="h-3 w-3" />
-                    Nombre Normalizado
-                  </Label>
-                  <code className="text-xs text-muted-foreground">{form.name_normalized}</code>
-                </div>
-              )}
-
-              {form.created_at && (
-                <div className="p-3 bg-background rounded-md border">
-                  <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    Creacion
-                  </Label>
-                  <p className="text-xs">{new Date(form.created_at).toLocaleString('es-CL')}</p>
-                </div>
-              )}
-
-              {form.updated_at && (
-                <div className="p-3 bg-background rounded-md border">
-                  <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    Ultima Actualizacion
-                  </Label>
-                  <p className="text-xs">{new Date(form.updated_at).toLocaleString('es-CL')}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Basic Info Section */}
-        <div className="rounded-lg border border-border bg-card p-6 space-y-5">
-          <div className="flex items-center gap-2 pb-2">
-            <Type className="h-5 w-5 text-primary" />
-            <h3 className="font-semibold text-lg">Informacion Basica</h3>
-          </div>
-
-          {/* Name */}
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium flex items-center gap-1">
+              {/* Name */}
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-sm font-medium flex items-center gap-1">
               Nombre de la Carta <span className="text-destructive">*</span>
             </Label>
             <Input
@@ -531,16 +694,56 @@ export function CardForm({
 
         {/* Tags Section */}
         <div className="rounded-lg border border-border bg-card p-6 space-y-5">
-          <div className="flex items-center gap-2 pb-2">
-            <TagIcon className="h-5 w-5 text-primary" />
-            <h3 className="font-semibold text-lg">Etiquetas</h3>
+          <div className="flex items-center justify-between gap-3 pb-2">
+            <div className="flex items-center gap-2">
+              <TagIcon className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold text-lg">Etiquetas</h3>
+            </div>
+            <Dialog open={isCreateTagOpen} onOpenChange={setIsCreateTagOpen}>
+              <DialogTrigger asChild>
+                <Button type="button" variant="outline" size="sm" className="gap-1.5">
+                  <Plus className="h-3.5 w-3.5" />
+                  Crear
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Crear etiqueta</DialogTitle>
+                  <DialogDescription>
+                    Se genera un slug automáticamente. Luego puedes asignarla a la carta.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2">
+                  <Label htmlFor="tag-name">Nombre</Label>
+                  <Input
+                    id="tag-name"
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    placeholder="Ej: control, sacrificio, vampiros..."
+                    disabled={isCreatingTag}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsCreateTagOpen(false)} disabled={isCreatingTag}>
+                    Cancelar
+                  </Button>
+                  <Button type="button" onClick={handleCreateTag} disabled={isCreatingTag || !newTagName.trim()}>
+                    {isCreatingTag ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Crear etiqueta
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {tags.length === 0 ? (
+            {availableTags.length === 0 ? (
               <p className="text-sm text-muted-foreground">No hay etiquetas disponibles</p>
             ) : (
-              tags.map((tag) => (
+              availableTags
+                .slice()
+                .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+                .map((tag) => (
                 <Badge
                   key={tag.tag_id}
                   variant={form.tag_ids.includes(tag.tag_id) ? 'default' : 'outline'}
@@ -555,6 +758,9 @@ export function CardForm({
           </div>
         </div>
 
+        </TabsContent>
+
+        <TabsContent value="printings" className="space-y-6">
         {/* ============================================================ */}
         {/* Printings Section — NEW inline printing forms                */}
         {/* ============================================================ */}
@@ -610,6 +816,132 @@ export function CardForm({
           </div>
         </div>
 
+        {/* Existing Printings (Edit Mode) */}
+        {mode === 'edit' ? (
+          <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-lg">Impresiones existentes</h3>
+                <Badge variant="secondary" className="text-xs">
+                  {existingPrintings.length}
+                </Badge>
+              </div>
+              <Link href={`/admin/cards/${form.card_id}/printings/new`}>
+                <Button type="button" variant="outline" size="sm" className="gap-1.5">
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  Form completo
+                </Button>
+              </Link>
+            </div>
+
+            {existingPrintings.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Esta carta aún no tiene impresiones.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {existingPrintings.map((p) => {
+                  const block = p.edition?.block_id ? blocks.find((b) => b.block_id === p.edition.block_id) : null;
+                  const consensusPrice =
+                    (p as unknown as { price_consensus?: { consensus_price?: number } | null })
+                      .price_consensus?.consensus_price ?? null;
+                  return (
+                    <div
+                      key={p.card_printing_id}
+                      className="flex gap-3 rounded-md border border-border bg-background/30 p-3 transition-colors hover:border-primary hover:bg-muted/20"
+                    >
+                      <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded-md border border-border bg-background">
+                        <CardImage src={p.image_url ?? null} alt={form.name || 'Carta'} className="h-full w-full" />
+                      </div>
+
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary" className="text-xs">
+                            {editionDisplayName(p.edition.name)}
+                          </Badge>
+                          {consensusPrice !== null && typeof consensusPrice === 'number' ? (
+                            <Badge variant="secondary" className="text-xs font-mono">
+                              {formatCLP(consensusPrice)}
+                            </Badge>
+                          ) : null}
+                          {p.rarity_tier ? (
+                            <Badge variant="outline" className="text-xs">
+                              {p.rarity_tier.name}
+                            </Badge>
+                          ) : null}
+                          <Badge
+                            variant={
+                              p.legal_status === 'LEGAL'
+                                ? 'default'
+                                : p.legal_status === 'RESTRICTED'
+                                  ? 'secondary'
+                                  : 'destructive'
+                            }
+                            className="text-xs"
+                          >
+                            {p.legal_status === 'LEGAL'
+                              ? 'Legal'
+                              : p.legal_status === 'RESTRICTED'
+                                ? 'Restringida'
+                                : p.legal_status === 'BANNED'
+                                  ? 'Prohibida'
+                                  : 'Discontinuada'}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <p className="text-xs text-muted-foreground">{block ? `Bloque: ${block.name}` : 'Bloque: N/A'}</p>
+                          <code className="block text-[10px] text-muted-foreground">{p.card_printing_id}</code>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Link href={`/admin/cards/${form.card_id}/printings/${p.card_printing_id}/edit`} className="flex-1">
+                            <Button type="button" variant="outline" size="sm" className="h-8 w-full">
+                              Editar
+                            </Button>
+                          </Link>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            title="Eliminar impresión"
+                            onClick={() => handleDeletePrinting(p.card_printing_id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        </TabsContent>
+
+        <TabsContent value="stores" className="space-y-6">
+          {mode !== 'edit' || !form.card_id ? (
+            <div className="rounded-lg border border-dashed border-border bg-muted/10 p-8 text-center">
+              <Link2 className="mx-auto mb-3 h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">
+                Guarda la carta primero para poder vincular tiendas.
+              </p>
+            </div>
+          ) : existingPrintings.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border bg-muted/10 p-8 text-center">
+              <Layers className="mx-auto mb-3 h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">
+                Crea al menos una impresión para poder vincular tiendas y precios.
+              </p>
+            </div>
+          ) : (
+            <CardStoreLinks cardId={form.card_id} cardName={form.name} printings={existingPrintings} />
+          )}
+        </TabsContent>
+        </Tabs>
+
         {/* Action Buttons */}
         <div className="flex justify-end gap-3 pt-2">
           <Button type="button" variant="outline" size="lg" onClick={() => router.back()}>
@@ -626,14 +958,93 @@ export function CardForm({
         </div>
       </form>
 
-      {/* Right Sidebar - Preview & Existing Printings */}
-      <div className="lg:col-span-1 space-y-6">
-        {/* Card Preview */}
-        <div className="rounded-lg border border-border bg-gradient-to-br from-primary/5 to-primary/10 p-6 sticky top-6">
-          <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-            <ImagePlus className="h-5 w-5 text-primary" />
-            Vista Previa
-          </h3>
+      {/* Right Sidebar - Preview */}
+      <div className="lg:col-span-3">
+        <div className="sticky top-6 space-y-6">
+          {/* Card Preview */}
+          <div className="rounded-lg border border-border bg-gradient-to-br from-primary/5 to-primary/10 p-4">
+            <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+              <ImagePlus className="h-5 w-5 text-primary" />
+              Vista Previa
+            </h3>
+
+          <div className="mb-4 space-y-2">
+            {imagePrintings.length > 0 ? (
+              (() => {
+                const current = imagePrintings[carouselIndex]!;
+                return (
+                  <>
+                    <div className="relative overflow-hidden rounded-md border border-border bg-background">
+                      <CardImage
+                        src={current.image_url ?? null}
+                        alt={`${form.name || 'Carta'} — ${editionDisplayName(current.edition.name)}`}
+                        className="h-[140px] w-full"
+                        fit="contain"
+                        priority
+                      />
+                      {imagePrintings.length > 1 && (
+                        <div className="pointer-events-none absolute inset-0 flex items-center justify-between px-2">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="secondary"
+                            className="pointer-events-auto h-8 w-8 rounded-full"
+                            onClick={() => setCarouselIndex((i) => (i - 1 + imagePrintings.length) % imagePrintings.length)}
+                            title="Anterior"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="secondary"
+                            className="pointer-events-auto h-8 w-8 rounded-full"
+                            onClick={() => setCarouselIndex((i) => (i + 1) % imagePrintings.length)}
+                            title="Siguiente"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                      {imagePrintings.length > 1 && (
+                        <div className="absolute bottom-2 right-2 rounded-full bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur">
+                          {carouselIndex + 1}/{imagePrintings.length}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="secondary" className="max-w-[70%] truncate text-[11px]">
+                        {editionDisplayName(current.edition.name)}
+                      </Badge>
+                      <Badge
+                        variant={
+                          current.legal_status === 'LEGAL'
+                            ? 'default'
+                            : current.legal_status === 'RESTRICTED'
+                              ? 'secondary'
+                              : 'destructive'
+                        }
+                        className="text-[11px]"
+                      >
+                        {current.legal_status === 'LEGAL'
+                          ? 'Legal'
+                          : current.legal_status === 'RESTRICTED'
+                            ? 'Restringida'
+                            : current.legal_status === 'BANNED'
+                              ? 'Prohibida'
+                              : 'Discontinuada'}
+                      </Badge>
+                    </div>
+                  </>
+                );
+              })()
+            ) : (
+              <div className="overflow-hidden rounded-md border border-border bg-background">
+                <CardImage src={null} alt="Sin imagen" className="h-[140px] w-full" />
+              </div>
+            )}
+          </div>
+
           <div className="space-y-3 text-sm">
             <div>
               <Label className="text-xs text-muted-foreground">Nombre</Label>
@@ -663,6 +1074,30 @@ export function CardForm({
               {form.can_be_starting_gold && <Badge variant="outline" className="text-xs">Oro inicial</Badge>}
             </div>
 
+            <div className="rounded-md border border-border bg-background/50 p-3">
+              <Label className="text-xs text-muted-foreground">Resumen</Label>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Impresiones</p>
+                  <p className="font-mono font-medium">{existingPrintings.length}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Con imagen</p>
+                  <p className="font-mono font-medium">{imagePrintings.length}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Etiquetas</p>
+                  <p className="font-mono font-medium">{form.tag_ids.length}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Consenso</p>
+                  <p className="font-mono font-medium">
+                    {printingPriceSummary ? `${formatCLP(printingPriceSummary.min)}–${formatCLP(printingPriceSummary.max)}` : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Summary of new printings */}
             {printingDrafts.filter((d) => d.edition_id).length > 0 && (
               <div className="pt-2 border-t border-border">
@@ -686,73 +1121,8 @@ export function CardForm({
               </div>
             )}
           </div>
-        </div>
-
-        {/* Existing Printings (Edit Mode) */}
-        {mode === 'edit' && printings && printings.length > 0 && (
-          <div className="rounded-lg border border-border bg-card p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-lg">Impresiones existentes ({printings.length})</h3>
-              <Link href={`/admin/cards/${form.card_id}/printings/new`}>
-                <Button type="button" variant="outline" size="sm">
-                  <ImagePlus className="mr-2 h-3.5 w-3.5" />
-                  Form completo
-                </Button>
-              </Link>
-            </div>
-            <div className="space-y-2">
-              {printings.map((p) => {
-                const edition = editions.find((e) => e.edition_id === p.edition_id);
-                const block = edition ? blocks.find((b) => b.block_id === edition.block_id) : null;
-
-                return (
-                  <Link
-                    key={p.card_printing_id}
-                    href={`/admin/cards/${form.card_id}/printings/${p.card_printing_id}/edit`}
-                    className="block p-3 rounded-md border border-border hover:border-primary hover:bg-muted/30 transition-colors"
-                  >
-                    <div className="space-y-2">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary" className="text-xs">
-                            {editionDisplayName(p.edition.name)}
-                          </Badge>
-                          {p.rarity_tier && <Badge variant="outline" className="text-xs">{p.rarity_tier.name}</Badge>}
-                        </div>
-                        {block && (
-                          <p className="text-xs text-muted-foreground">
-                            Bloque: {block.name}
-                          </p>
-                        )}
-                      </div>
-
-                      <Badge
-                        variant={
-                          p.legal_status === 'LEGAL'
-                            ? 'default'
-                            : p.legal_status === 'RESTRICTED'
-                              ? 'secondary'
-                              : 'destructive'
-                        }
-                        className="text-xs"
-                      >
-                        {p.legal_status === 'LEGAL'
-                          ? 'Legal'
-                          : p.legal_status === 'RESTRICTED'
-                            ? 'Restringida'
-                            : p.legal_status === 'BANNED'
-                              ? 'Prohibida'
-                              : 'Discontinuada'}
-                      </Badge>
-
-                      <code className="text-xs text-muted-foreground block">{p.card_printing_id}</code>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

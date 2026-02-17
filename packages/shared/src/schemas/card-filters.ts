@@ -19,6 +19,9 @@ export const cardFiltersSchema = paginationQuerySchema.extend({
   cost_min: z.coerce.number().int().min(0).optional(),
   cost_max: z.coerce.number().int().min(0).optional(),
   tag_slug: z.string().optional(),
+  price_min: z.coerce.number().min(0).optional(),
+  price_max: z.coerce.number().min(0).optional(),
+  has_price: z.coerce.boolean().optional(),
 });
 
 export type CardFilters = z.infer<typeof cardFiltersSchema>;

@@ -8,11 +8,21 @@ import { AppError } from '@/lib/api/errors';
  * GET /api/v1/me
  * Returns the current authenticated user's profile
  */
-export const GET = withApiHandler(async (_request, { requestId: _requestId }) => {
+export const GET = withApiHandler(async (request, { requestId: _requestId }) => {
   const supabase = await createClient();
-  const {
+  let {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Fallback: accept Bearer token when cookies are not available yet.
+  if (!user) {
+    const authHeader = request.headers.get('authorization') ?? request.headers.get('Authorization');
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
+    if (token) {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (!error) user = data.user;
+    }
+  }
 
   if (!user) {
     throw new AppError('NOT_AUTHENTICATED', 'Debes iniciar sesión');

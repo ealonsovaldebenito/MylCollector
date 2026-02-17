@@ -2,15 +2,15 @@ import type { DeckExportData } from './txt-formatter.js';
 
 /**
  * Format deck as CSV (structured data)
- * Columns: Qty, Card Name, Edition, Type, Cost, Starting Gold, Legal Status
+ * Columns: Qty, Card Name, Edition, Edition Code, Type, Type Code, Cost, Race, Unique, Has Ability, Ability Text, Tags, Starting Gold, Legal Status
  */
 export function formatDeckAsCsv(data: DeckExportData): string {
   const lines: string[] = [];
 
-  // Header row
-  lines.push('Qty,Card Name,Edition,Type,Cost,Starting Gold,Legal Status');
+  lines.push(
+    'Qty,Card Name,Edition,Edition Code,Type,Type Code,Cost,Race,Unique,Has Ability,Ability Text,Tags,Starting Gold,Legal Status',
+  );
 
-  // Sort cards by type, then by cost, then by name
   const sortedCards = [...data.cards].sort((a, b) => {
     if (a.card_type_name !== b.card_type_name) {
       return a.card_type_name.localeCompare(b.card_type_name);
@@ -25,25 +25,30 @@ export function formatDeckAsCsv(data: DeckExportData): string {
     return a.card_name.localeCompare(b.card_name);
   });
 
-  // Data rows
   for (const card of sortedCards) {
     const qty = card.qty;
     const name = escapeCsvField(card.card_name);
     const edition = escapeCsvField(card.edition_name);
+    const editionCode = escapeCsvField(card.edition_code ?? '');
     const type = escapeCsvField(card.card_type_name);
-    const cost = card.cost !== null ? card.cost : '';
-    const startingGold = card.is_starting_gold ? 'Sí' : 'No';
-    const legalStatus = 'STANDARD'; // We'll need to add this to DeckExportCard if needed
+    const typeCode = escapeCsvField(card.card_type_code ?? '');
+    const cost = card.cost !== null ? String(card.cost) : '';
+    const race = escapeCsvField(card.race_name ?? '');
+    const unique = card.is_unique ? 'Si' : 'No';
+    const hasAbility = card.has_ability ? 'Si' : 'No';
+    const abilityText = escapeCsvField((card.ability_text ?? '').trim());
+    const tags = escapeCsvField(card.tags.join(';'));
+    const startingGold = card.is_starting_gold ? 'Si' : 'No';
+    const legalStatus = escapeCsvField(card.legal_status ?? '');
 
-    lines.push(`${qty},${name},${edition},${type},${cost},${startingGold},${legalStatus}`);
+    lines.push(
+      `${qty},${name},${edition},${editionCode},${type},${typeCode},${cost},${race},${unique},${hasAbility},${abilityText},${tags},${startingGold},${legalStatus}`,
+    );
   }
 
   return lines.join('\n');
 }
 
-/**
- * Escape CSV field (quote if contains comma, quote, or newline)
- */
 function escapeCsvField(value: string): string {
   if (value.includes(',') || value.includes('"') || value.includes('\n')) {
     return `"${value.replace(/"/g, '""')}"`;

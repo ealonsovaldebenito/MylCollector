@@ -6,11 +6,12 @@ import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { CardDetailHero } from './card-detail-hero';
 import { CardDetailPrintings } from './card-detail-printings';
 import { CardDetailLegality } from './card-detail-legality';
+import { CardDetailOracles } from './card-detail-oracles';
 import { CardDetailPrices } from './card-detail-prices';
 import { CardDetailStats } from './card-detail-stats';
 import { CardDetailSimilar } from './card-detail-similar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Layers, Shield, DollarSign, BarChart3, ArrowLeft } from 'lucide-react';
+import { Layers, Shield, BookOpenCheck, DollarSign, BarChart3, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
@@ -65,6 +66,13 @@ export function CardDetailPage({ card, similarCards }: CardDetailPageProps) {
             Legalidad
           </TabsTrigger>
           <TabsTrigger
+            value="oracles"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none gap-2"
+          >
+            <BookOpenCheck className="h-4 w-4" />
+            Oráculos
+          </TabsTrigger>
+          <TabsTrigger
             value="prices"
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none gap-2"
           >
@@ -86,6 +94,10 @@ export function CardDetailPage({ card, similarCards }: CardDetailPageProps) {
 
         <TabsContent value="legality" className="mt-6">
           <CardDetailLegality card={card} />
+        </TabsContent>
+
+        <TabsContent value="oracles" className="mt-6">
+          <CardDetailOracles cardId={card.card_id} />
         </TabsContent>
 
         <TabsContent value="prices" className="mt-6">

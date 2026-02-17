@@ -13,7 +13,6 @@ export const GET = withApiHandler(async () => {
   const { data: currencies, error } = await supabase
     .from('currencies')
     .select('currency_id, code, name, symbol')
-    .eq('is_active', true)
     .order('code');
 
   if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar monedas');

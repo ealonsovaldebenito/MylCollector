@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { PriceSubmissionForm } from './price-submission-form';
 import { PriceSubmissionList } from './price-submission-list';
 import { PriceStatsCard } from './price-stats-card';
+import { StorePricesList } from './store-prices-list';
 import { usePriceSubmissions } from '@/hooks/use-prices';
 import { DollarSign } from 'lucide-react';
 
@@ -58,6 +59,9 @@ export function PriceSection({ cardPrintingId, isAuthenticated = false, defaultC
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Store prices (always visible above tabs) */}
+      <StorePricesList cardPrintingId={cardPrintingId} />
 
       {/* Content with tabs */}
       <Tabs defaultValue="community" className="w-full">

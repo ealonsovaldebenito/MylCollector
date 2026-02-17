@@ -27,7 +27,31 @@ function normalizeCardName(name: string): string {
  * Returns printings with nested card + edition + rarity relations.
  */
 export async function searchCards(supabase: Client, filters: CardFilters) {
-  const { q, block_id, edition_id, race_id, card_type_id, rarity_tier_id, legal_status, cost_min, cost_max, tag_slug, limit, cursor } = filters;
+  const { q, block_id, edition_id, race_id, card_type_id, rarity_tier_id, legal_status, cost_min, cost_max, tag_slug, price_min, price_max, has_price, limit, cursor } = filters;
+
+  // If filtering by price, first resolve matching card_printing_ids
+  let pricePrintingIds: string[] | undefined;
+  if (price_min !== undefined || price_max !== undefined || has_price) {
+    let priceQuery = supabase
+      .from('store_printing_links')
+      .select('card_printing_id')
+      .eq('is_active', true)
+      .not('last_price', 'is', null);
+
+    if (price_min !== undefined) {
+      priceQuery = priceQuery.gte('last_price', price_min);
+    }
+    if (price_max !== undefined) {
+      priceQuery = priceQuery.lte('last_price', price_max);
+    }
+
+    const { data: priceMatches } = await priceQuery;
+    if (priceMatches && priceMatches.length > 0) {
+      pricePrintingIds = [...new Set(priceMatches.map((p) => p.card_printing_id as string))];
+    } else {
+      return { items: [], next_cursor: null, total: 0 };
+    }
+  }
 
   // If filtering by tag, first resolve matching card_ids
   let tagCardIds: string[] | undefined;
@@ -107,6 +131,11 @@ export async function searchCards(supabase: Client, filters: CardFilters) {
     query = query.in('card_id', tagCardIds);
   }
 
+  // Price filter — restrict to printing_ids that have prices in range
+  if (pricePrintingIds) {
+    query = query.in('card_printing_id', pricePrintingIds);
+  }
+
   // Filters on printing
   if (edition_id) {
     query = query.eq('edition_id', edition_id);
@@ -152,12 +181,37 @@ export async function searchCards(supabase: Client, filters: CardFilters) {
     }
   }
 
+  // Batch-fetch store min prices for all printings in this page
+  const printingIds = rawItems.map((row) => row.card_printing_id as string);
+  const priceMap = new Map<string, number>();
+
+  if (printingIds.length > 0) {
+    const { data: storePrices } = await supabase
+      .from('store_printing_links')
+      .select('card_printing_id, last_price')
+      .in('card_printing_id', printingIds)
+      .eq('is_active', true)
+      .not('last_price', 'is', null);
+
+    if (storePrices) {
+      for (const sp of storePrices) {
+        const pid = sp.card_printing_id as string;
+        const price = sp.last_price as number;
+        const current = priceMap.get(pid);
+        if (current === undefined || price < current) {
+          priceMap.set(pid, price);
+        }
+      }
+    }
+  }
+
   const items = rawItems.map((row) => ({
     ...row,
     card: {
       ...row.card,
       tags: tagsMap.get(row.card.card_id as string) ?? [],
     },
+    store_min_price: priceMap.get(row.card_printing_id as string) ?? null,
   }));
 
   const lastItem = items[items.length - 1] as Record<string, unknown> | undefined;
@@ -191,6 +245,8 @@ export async function getCardById(supabase: Client, cardId: string) {
       can_be_starting_gold,
       text,
       flavor_text,
+      created_at,
+      updated_at,
       card_type:card_types!inner(card_type_id, name, code, sort_order),
       race:races(race_id, name, code, sort_order)
     `

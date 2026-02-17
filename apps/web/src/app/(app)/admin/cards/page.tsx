@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -44,11 +44,16 @@ export default function AdminCardsPage() {
   const { cardTypes, races, blocks, editions, isLoading: catalogLoading } = useCatalogData();
   const [cards, setCards] = useState<CardRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [total, setTotal] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('');
   const [filterRace, setFilterRace] = useState<string>('');
   const [filterBlock, setFilterBlock] = useState<string>('');
   const [filterEdition, setFilterEdition] = useState<string>('');
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [page, setPage] = useState<number>(1);
+  const [pageCursors, setPageCursors] = useState<Array<string | null>>([null]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
@@ -63,11 +68,17 @@ export default function AdminCardsPage() {
     if (filterRace) params.set('race_id', filterRace);
     if (filterBlock) params.set('block_id', filterBlock);
     if (filterEdition) params.set('edition_id', filterEdition);
+    params.set('limit', String(pageSize));
+
+    const cursor = pageCursors[page - 1] ?? null;
+    if (cursor) params.set('cursor', cursor);
 
     const qs = params.toString();
     const res = await fetch(`/api/v1/cards${qs ? `?${qs}` : ''}`);
     const json = await res.json();
     if (json.ok) {
+      setTotal(typeof json.data.total === 'number' ? json.data.total : null);
+      setNextCursor(json.data.next_cursor ?? null);
       // Group printings by card
       const cardsMap = new Map<string, CardRow>();
       json.data.items.forEach((item: Record<string, unknown>) => {
@@ -125,7 +136,14 @@ export default function AdminCardsPage() {
       setCards(cardsArray);
     }
     setIsLoading(false);
-  }, [search, filterType, filterRace, filterBlock, filterEdition, blocks]);
+  }, [search, filterType, filterRace, filterBlock, filterEdition, blocks, pageSize, pageCursors, page]);
+
+  // Reset pagination when filters / page size change
+  useEffect(() => {
+    setPage(1);
+    setPageCursors([null]);
+    setNextCursor(null);
+  }, [search, filterType, filterRace, filterBlock, filterEdition, pageSize]);
 
   useEffect(() => {
     if (!catalogLoading) {
@@ -212,6 +230,9 @@ export default function AdminCardsPage() {
     return { total, byType, totalPrintings, uniques };
   }, [cards, cardTypes]);
 
+  const canPrev = page > 1;
+  const canNext = nextCursor !== null;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -297,6 +318,51 @@ export default function AdminCardsPage() {
               className="pl-9"
             />
           </div>
+          <div className="hidden items-center gap-2 sm:flex">
+            <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Por página" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="25">25 / pág.</SelectItem>
+                <SelectItem value="50">50 / pág.</SelectItem>
+                <SelectItem value="100">100 / pág.</SelectItem>
+                <SelectItem value="200">200 / pág.</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canPrev || isLoading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canNext || isLoading}
+                onClick={() => {
+                  if (!nextCursor) return;
+                  setPageCursors((prev) => {
+                    const next = [...prev];
+                    next[page] = nextCursor;
+                    return next;
+                  });
+                  setPage((p) => p + 1);
+                }}
+              >
+                Siguiente
+              </Button>
+              <span className="ml-2 text-xs text-muted-foreground">
+                Página {page}
+                {total !== null ? ` · ${total} resultados` : null}
+              </span>
+            </div>
+          </div>
           <Button variant="outline" size="icon" onClick={() => setShowFilters(!showFilters)}>
             <Filter className="h-4 w-4" />
           </Button>
@@ -327,17 +393,60 @@ export default function AdminCardsPage() {
           </div>
         </div>
 
+        <div className="flex items-center justify-between gap-2 sm:hidden">
+          <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Por página" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="25">25 / pág.</SelectItem>
+              <SelectItem value="50">50 / pág.</SelectItem>
+              <SelectItem value="100">100 / pág.</SelectItem>
+              <SelectItem value="200">200 / pág.</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canPrev || isLoading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Anterior
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canNext || isLoading}
+              onClick={() => {
+                if (!nextCursor) return;
+                setPageCursors((prev) => {
+                  const next = [...prev];
+                  next[page] = nextCursor;
+                  return next;
+                });
+                setPage((p) => p + 1);
+              }}
+            >
+              Siguiente
+            </Button>
+            <span className="text-xs text-muted-foreground">Página {page}</span>
+          </div>
+        </div>
+
         {showFilters && (
           <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1.5">
                 <Label className="text-xs">Tipo</Label>
-                <Select value={filterType} onValueChange={setFilterType}>
+                <Select value={filterType || '__all__'} onValueChange={(v) => setFilterType(v === '__all__' ? '' : v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Todos los tipos" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todos</SelectItem>
+                    <SelectItem value="__all__">Todos</SelectItem>
                     {cardTypes.map((ct) => (
                       <SelectItem key={ct.card_type_id} value={ct.card_type_id}>
                         {ct.name}
@@ -349,12 +458,12 @@ export default function AdminCardsPage() {
 
               <div className="space-y-1.5">
                 <Label className="text-xs">Raza</Label>
-                <Select value={filterRace} onValueChange={setFilterRace}>
+                <Select value={filterRace || '__all__'} onValueChange={(v) => setFilterRace(v === '__all__' ? '' : v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Todas las razas" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todas</SelectItem>
+                    <SelectItem value="__all__">Todas</SelectItem>
                     {races.map((r) => (
                       <SelectItem key={r.race_id} value={r.race_id}>
                         {r.name}
@@ -367,9 +476,9 @@ export default function AdminCardsPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Bloque</Label>
                 <Select
-                  value={filterBlock}
+                  value={filterBlock || '__all__'}
                   onValueChange={(v) => {
-                    setFilterBlock(v);
+                    setFilterBlock(v === '__all__' ? '' : v);
                     setFilterEdition('');
                   }}
                 >
@@ -377,7 +486,7 @@ export default function AdminCardsPage() {
                     <SelectValue placeholder="Todos los bloques" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todos</SelectItem>
+                    <SelectItem value="__all__">Todos</SelectItem>
                     {blocks.map((b) => (
                       <SelectItem key={b.block_id} value={b.block_id}>
                         {b.name}
@@ -389,12 +498,16 @@ export default function AdminCardsPage() {
 
               <div className="space-y-1.5">
                 <Label className="text-xs">Edición</Label>
-                <Select value={filterEdition} onValueChange={setFilterEdition} disabled={!filterBlock}>
+                <Select
+                  value={filterEdition || '__all__'}
+                  onValueChange={(v) => setFilterEdition(v === '__all__' ? '' : v)}
+                  disabled={!filterBlock}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Todas las ediciones" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todas</SelectItem>
+                    <SelectItem value="__all__">Todas</SelectItem>
                     {filteredEditions.map((e) => (
                       <SelectItem key={e.edition_id} value={e.edition_id}>
                         {editionDisplayName(e.name)}
@@ -446,9 +559,8 @@ export default function AdminCardsPage() {
             </thead>
             <tbody>
               {cards.map((card) => (
-                <>
+                <Fragment key={card.card_id}>
                   <tr
-                    key={card.card_id}
                     className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors cursor-pointer"
                     onClick={() =>
                       setExpandedCard(expandedCard === card.card_id ? null : card.card_id)
@@ -629,7 +741,7 @@ export default function AdminCardsPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CardPrintingData } from '@/hooks/use-deck-builder';
 import { useCards } from '@/hooks/use-cards';
 import { useCatalogData } from '@/hooks/use-catalog-data';
@@ -11,32 +11,78 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CardImage } from '@/components/catalog/card-image';
-import { Search, Plus, Loader2 } from 'lucide-react';
+import { Loader2, Plus, Search } from 'lucide-react';
 
 interface BuilderCardBrowserProps {
   onAddCard: (card: CardPrintingData) => void;
   deckCardIds: Set<string>;
+  preset?: {
+    block_id?: string | null;
+    edition_id?: string | null;
+    race_id?: string | null;
+    lock_block?: boolean;
+    lock_edition?: boolean;
+    lock_race?: boolean;
+    hide_block_edition_race_filters?: boolean;
+    race_mode?: 'STRICT_FILTER' | 'ALLY_WHITELIST';
+  };
 }
 
-export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowserProps) {
+export function BuilderCardBrowser({ onAddCard, deckCardIds, preset }: BuilderCardBrowserProps) {
   const [search, setSearch] = useState('');
   const [cardTypeFilter, setCardTypeFilter] = useState('');
   const [raceFilter, setRaceFilter] = useState('');
+  const [blockFilter, setBlockFilter] = useState('');
+  const [editionFilter, setEditionFilter] = useState('');
 
-  const { cardTypes, races } = useCatalogData();
+  const { cardTypes, races, blocks, editions } = useCatalogData();
 
-  const filters = useMemo(() => ({
-    q: search || undefined,
-    card_type_id: cardTypeFilter || undefined,
-    race_id: raceFilter || undefined,
-    limit: 50,
-  }), [search, cardTypeFilter, raceFilter]);
+  useEffect(() => {
+    if (!preset) return;
+    if (preset.block_id !== undefined) setBlockFilter(preset.block_id ?? '');
+    if (preset.edition_id !== undefined) setEditionFilter(preset.edition_id ?? '');
+
+    if (preset.race_mode === 'STRICT_FILTER') {
+      if (preset.race_id !== undefined) setRaceFilter(preset.race_id ?? '');
+    } else if (preset.lock_race) {
+      setRaceFilter('');
+    }
+  }, [preset]);
+
+  const effectiveBlockId = preset?.block_id ?? blockFilter;
+  const effectiveEditionId = preset?.edition_id ?? editionFilter;
+  const effectiveRaceId =
+    preset?.race_mode === 'STRICT_FILTER' ? (preset?.race_id ?? raceFilter) : raceFilter;
+
+  const filteredEditions = useMemo(
+    () => (blockFilter ? editions.filter((e) => e.block_id === blockFilter) : editions),
+    [blockFilter, editions],
+  );
+
+  const filters = useMemo(
+    () => ({
+      q: search || undefined,
+      card_type_id: cardTypeFilter || undefined,
+      race_id: effectiveRaceId || undefined,
+      block_id: effectiveBlockId || undefined,
+      edition_id: effectiveEditionId || undefined,
+      limit: 50,
+    }),
+    [search, cardTypeFilter, effectiveRaceId, effectiveBlockId, effectiveEditionId],
+  );
 
   const { cards, isLoading, hasMore, loadMore } = useCards(filters);
 
+  const visibleCards = useMemo(() => {
+    if (preset?.race_mode !== 'ALLY_WHITELIST' || !preset.race_id) return cards;
+    const raceId = preset.race_id;
+    return cards.filter((c) => c.card.race_id === null || c.card.race_id === raceId);
+  }, [cards, preset?.race_id, preset?.race_mode]);
+
+  const gridColsClass = preset?.hide_block_edition_race_filters ? 'grid-cols-1' : 'grid-cols-2';
+
   return (
     <div className="flex h-full flex-col">
-      {/* Search & Filters */}
       <div className="space-y-2 border-b border-border p-3">
         <div className="relative">
           <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
@@ -47,8 +93,12 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowse
             className="h-8 pl-8 text-xs"
           />
         </div>
-        <div className="flex gap-2">
-          <Select value={cardTypeFilter || '__all__'} onValueChange={(v) => setCardTypeFilter(v === '__all__' ? '' : v)}>
+
+        <div className={`grid ${gridColsClass} gap-2`}>
+          <Select
+            value={cardTypeFilter || '__all__'}
+            onValueChange={(v) => setCardTypeFilter(v === '__all__' ? '' : v)}
+          >
             <SelectTrigger className="h-7 text-[11px]">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
@@ -61,43 +111,99 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowse
               ))}
             </SelectContent>
           </Select>
-          <Select value={raceFilter || '__all__'} onValueChange={(v) => setRaceFilter(v === '__all__' ? '' : v)}>
-            <SelectTrigger className="h-7 text-[11px]">
-              <SelectValue placeholder="Raza" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todas las razas</SelectItem>
-              {races.map((r) => (
-                <SelectItem key={r.race_id} value={r.race_id}>
-                  {r.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+          {preset?.hide_block_edition_race_filters ? null : (
+            <Select
+              value={raceFilter || '__all__'}
+              onValueChange={(v) => setRaceFilter(v === '__all__' ? '' : v)}
+              disabled={preset?.lock_race}
+            >
+              <SelectTrigger className="h-7 text-[11px]">
+                <SelectValue placeholder="Raza" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Todas las razas</SelectItem>
+                {races.map((r) => (
+                  <SelectItem key={r.race_id} value={r.race_id}>
+                    {r.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {preset?.hide_block_edition_race_filters ? null : (
+            <Select
+              value={blockFilter || '__all__'}
+              onValueChange={(v) => {
+                const next = v === '__all__' ? '' : v;
+                setBlockFilter(next);
+                setEditionFilter('');
+              }}
+              disabled={preset?.lock_block}
+            >
+              <SelectTrigger className="h-7 text-[11px]">
+                <SelectValue placeholder="Era" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Todas las eras</SelectItem>
+                {blocks.map((b) => (
+                  <SelectItem key={b.block_id} value={b.block_id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {preset?.hide_block_edition_race_filters ? null : (
+            <Select
+              value={editionFilter || '__all__'}
+              onValueChange={(v) => {
+                const nextEditionId = v === '__all__' ? '' : v;
+                setEditionFilter(nextEditionId);
+                if (!nextEditionId) return;
+                const edition = editions.find((e) => e.edition_id === nextEditionId);
+                if (edition && !blockFilter) setBlockFilter(edition.block_id);
+              }}
+              disabled={preset?.lock_edition}
+            >
+              <SelectTrigger className="h-7 text-[11px]">
+                <SelectValue placeholder="Edición" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Todas las ediciones</SelectItem>
+                {filteredEditions.map((e) => (
+                  <SelectItem key={e.edition_id} value={e.edition_id}>
+                    {editionDisplayName(e.name)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
 
-      {/* Card list */}
       <ScrollArea className="flex-1">
         <div className="space-y-0.5 p-2">
-          {isLoading && cards.length === 0 ? (
+          {isLoading && visibleCards.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : cards.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              No se encontraron cartas
-            </p>
+          ) : visibleCards.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">No se encontraron cartas</p>
           ) : (
             <>
-              {cards.map((item) => {
+              {visibleCards.map((item) => {
                 const inDeck = deckCardIds.has(item.card_printing_id);
                 const printing: CardPrintingData = {
                   card_printing_id: item.card_printing_id,
                   image_url: item.image_url,
                   legal_status: item.legal_status as CardPrintingData['legal_status'],
                   edition: item.edition,
-                  rarity_tier: item.rarity_tier ? { name: item.rarity_tier.name, code: item.rarity_tier.code } : null,
+                  rarity_tier: item.rarity_tier
+                    ? { name: item.rarity_tier.name, code: item.rarity_tier.code }
+                    : null,
                   card: {
                     card_id: item.card.card_id,
                     name: item.card.name,
@@ -116,7 +222,6 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowse
                     key={item.card_printing_id}
                     className="group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50"
                   >
-                    {/* Mini image */}
                     <div className="h-9 w-6 flex-shrink-0 overflow-hidden rounded-sm">
                       <CardImage
                         src={item.image_url}
@@ -125,28 +230,24 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowse
                       />
                     </div>
 
-                    {/* Info */}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium">{item.card.name}</p>
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-muted-foreground">
-                          {item.card.card_type.name}
-                        </span>
-                        {item.card.cost !== null && (
+                        <span className="text-[10px] text-muted-foreground">{item.card.card_type.name}</span>
+                        {item.card.cost !== null ? (
                           <span className="text-[10px] text-muted-foreground">· C:{item.card.cost}</span>
-                        )}
+                        ) : null}
                         <Badge variant="outline" className="h-3.5 px-1 text-[9px]">
                           {editionDisplayName(item.edition.name)}
                         </Badge>
                       </div>
                     </div>
 
-                    {/* Add button */}
                     <Button
                       type="button"
                       variant={inDeck ? 'secondary' : 'ghost'}
                       size="icon"
-                      className="h-6 w-6 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="h-6 w-6 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                       onClick={() => onAddCard(printing)}
                     >
                       <Plus className="h-3.5 w-3.5" />
@@ -155,8 +256,7 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowse
                 );
               })}
 
-              {/* Load more */}
-              {hasMore && (
+              {hasMore ? (
                 <div className="flex justify-center pt-2">
                   <Button
                     type="button"
@@ -167,10 +267,10 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds }: BuilderCardBrowse
                     className="text-xs"
                   >
                     {isLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                    Cargar mas
+                    Cargar más
                   </Button>
                 </div>
-              )}
+              ) : null}
             </>
           )}
         </div>

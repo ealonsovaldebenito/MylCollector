@@ -1,6 +1,21 @@
+/**
+ * UserProvider — Contexto global de autenticación y perfil de usuario.
+ * Provee: user (Supabase Auth), profile (user_profiles), isAdmin, isLoading.
+ *
+ * Flujo:
+ *   1. onAuthStateChange escucha cambios de sesión (login, logout, refresh)
+ *   2. Cuando hay sesión, carga perfil desde user_profiles o /api/v1/me
+ *   3. Expone isAdmin basado en profile.role
+ *
+ * Changelog:
+ *   2026-02-16 — Creación inicial
+ *   2026-02-17 — Fix: AbortController interfería con Navigator Locks de Supabase
+ *   2026-02-17 — Fix: React Strict Mode double-mount causaba pérdida de sesión
+ */
+
 'use client';
 
-import { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
@@ -26,121 +41,98 @@ interface UserContextValue {
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
 
+function buildFallbackProfile(authUser: User): UserProfile {
+  return {
+    user_id: authUser.id,
+    email: authUser.email || '',
+    display_name: authUser.user_metadata?.display_name || null,
+    avatar_url: authUser.user_metadata?.avatar_url || null,
+    bio: null,
+    role: 'user',
+    is_active: true,
+    created_at: authUser.created_at,
+    updated_at: authUser.updated_at || authUser.created_at,
+  };
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     const supabase = createClient();
 
-    // Load user and profile once
-    const loadUser = async () => {
+    /** Load profile for an authenticated user (server is source of truth for role). */
+    async function loadProfile(session: { user: User; access_token?: string }) {
+      // Prefer /api/v1/me to avoid RLS issues and to guarantee role comes from DB.
       try {
-        const {
-          data: { user: authUser },
-        } = await supabase.auth.getUser();
+        const headers: Record<string, string> = {};
+        if (session.access_token) headers.Authorization = `Bearer ${session.access_token}`;
 
-        setUser(authUser);
-
-        if (authUser) {
-          // Use API endpoint to fetch profile (bypasses RLS issues)
-          try {
-            const response = await fetch('/api/v1/me');
-            if (response.ok) {
-              const data = await response.json();
-              setProfile(data.profile);
-            } else {
-              console.warn('API returned error, using fallback');
-              // Fallback if API fails
-              setProfile({
-                user_id: authUser.id,
-                email: authUser.email || '',
-                display_name: authUser.user_metadata?.display_name || null,
-                avatar_url: authUser.user_metadata?.avatar_url || null,
-                bio: null,
-                role: 'user',
-                is_active: true,
-                created_at: authUser.created_at,
-                updated_at: authUser.updated_at || authUser.created_at,
-              });
-            }
-          } catch (error) {
-            console.warn('Failed to load profile via API', error);
-            // Fallback profile
-            setProfile({
-              user_id: authUser.id,
-              email: authUser.email || '',
-              display_name: authUser.user_metadata?.display_name || null,
-              avatar_url: null,
-              bio: null,
-              role: 'user',
-              is_active: true,
-              created_at: authUser.created_at,
-              updated_at: authUser.created_at,
-            });
+        const response = await fetch('/api/v1/me', { headers });
+        if (response.ok && mountedRef.current) {
+          const json = await response.json();
+          if (json?.ok && json.data?.profile) {
+            setProfile(json.data.profile as UserProfile);
+            return;
           }
         }
-      } catch (error) {
-        console.error('Error loading user:', error);
-      } finally {
-        setIsLoading(false);
+      } catch {
+        // API failed
       }
-    };
 
-    loadUser();
+      // Secondary attempt: direct query (may be blocked by RLS in some setups).
+      try {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .single();
 
-    // Listen for auth changes
+        if (!error && data && mountedRef.current) {
+          setProfile(data as UserProfile);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Last resort: build from auth metadata (role defaults to 'user').
+      if (mountedRef.current) setProfile(buildFallbackProfile(session.user));
+    }
+
+    // Subscribe to auth state changes — this is the single source of truth.
+    // INITIAL_SESSION fires immediately with the current session (or null).
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mountedRef.current) return;
 
-      if (session?.user) {
-        try {
-          const { data: profileData, error } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('user_id', session.user.id)
-            .single();
+      const authUser = session?.user ?? null;
+      setUser(authUser);
 
-          if (error) {
-            console.warn('Error loading profile on auth change:', error.message);
-            // Use API endpoint as fallback
-            try {
-              const response = await fetch('/api/v1/me');
-              if (response.ok) {
-                const data = await response.json();
-                setProfile(data.profile);
-              }
-            } catch {
-              // Ultimate fallback
-              setProfile({
-                user_id: session.user.id,
-                email: session.user.email || '',
-                display_name: session.user.user_metadata?.display_name || null,
-                avatar_url: null,
-                bio: null,
-                role: 'user',
-                is_active: true,
-                created_at: session.user.created_at,
-                updated_at: session.user.created_at,
-              });
-            }
-          } else {
-            setProfile(profileData);
-          }
-        } catch {
-          setProfile(null);
-        }
+      if (authUser && session) {
+        await loadProfile({ user: authUser, access_token: session.access_token });
       } else {
         setProfile(null);
       }
 
-      setIsLoading(false);
+      if (mountedRef.current) setIsLoading(false);
     });
 
+    // Safety: if INITIAL_SESSION doesn't fire within 3s, stop loading.
+    const timeout = setTimeout(() => {
+      if (mountedRef.current && isLoading) {
+        setIsLoading(false);
+      }
+    }, 3000);
+
     return () => {
+      mountedRef.current = false;
+      clearTimeout(timeout);
       subscription.unsubscribe();
     };
   }, []);

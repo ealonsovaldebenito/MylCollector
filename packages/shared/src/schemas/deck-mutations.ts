@@ -13,6 +13,9 @@ export const createDeckSchema = z.object({
   edition_id: z.string().uuid().nullable().optional(),
   race_id: z.string().uuid().nullable().optional(),
   description: z.string().max(1000).optional(),
+  strategy: z.string().max(2000).optional(),
+  cover_image_url: z.string().url().max(2000).optional(),
+  tag_ids: z.array(z.string().uuid()).max(50).optional(),
   visibility: visibilitySchema.default('PRIVATE'),
 });
 

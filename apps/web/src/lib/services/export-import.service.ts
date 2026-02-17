@@ -37,15 +37,87 @@ export async function getDeckExportData(
     throw new Error('Deck not found');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cards: DeckExportCard[] = (version.cards as any[]).map((c: any) => ({
-    qty: c.qty,
-    card_name: c.card_printing.card.name,
-    edition_name: c.card_printing.edition.name,
-    is_starting_gold: c.is_starting_gold,
-    card_type_name: c.card_printing.card.card_type.name,
-    cost: c.card_printing.card.cost,
-  }));
+  type VersionCardRow = {
+    qty: number;
+    is_starting_gold: boolean;
+    card_printing: {
+      card_printing_id: string;
+      legal_status: string;
+      printing_variant: string;
+      edition: { name: string; code: string };
+      rarity_tier: { name: string; code: string } | null;
+      card: {
+        card_id: string;
+        name: string;
+        cost: number | null;
+        is_unique: boolean;
+        has_ability: boolean;
+        card_type: { name: string; code: string };
+        race: { name: string; code: string } | null;
+      };
+    };
+  };
+
+  const rows = (version.cards as unknown as VersionCardRow[]) ?? [];
+  const cardIds = [...new Set(rows.map((r) => r.card_printing.card.card_id))];
+
+  const tagsByCardId = new Map<string, string[]>();
+  const abilityTextByCardId = new Map<string, string | null>();
+
+  if (cardIds.length > 0) {
+    const { data: textRows } = await supabase
+      .from('cards')
+      .select('card_id, text')
+      .in('card_id', cardIds);
+
+    for (const row of (textRows ?? []) as Array<{ card_id: string; text: string | null }>) {
+      abilityTextByCardId.set(row.card_id, row.text ?? null);
+    }
+  }
+
+  if (cardIds.length > 0) {
+    const { data: tagRows } = await supabase
+      .from('card_tags')
+      .select('card_id, tag:tags!inner(name)')
+      .in('card_id', cardIds);
+
+    type TagRow = { card_id: string; tag: { name: string } | Array<{ name: string }> };
+    for (const tr of ((tagRows ?? []) as TagRow[])) {
+      const tagObj = Array.isArray(tr.tag) ? tr.tag[0] : tr.tag;
+      const name = tagObj?.name;
+      if (!name) continue;
+      const list = tagsByCardId.get(tr.card_id) ?? [];
+      list.push(name);
+      tagsByCardId.set(tr.card_id, list);
+    }
+  }
+
+  const cards: DeckExportCard[] = rows.map((c) => {
+    const card = c.card_printing.card;
+    const edition = c.card_printing.edition;
+    const tags = tagsByCardId.get(card.card_id) ?? [];
+    tags.sort((a, b) => a.localeCompare(b, 'es'));
+
+    return {
+      qty: c.qty,
+      card_id: card.card_id,
+      card_printing_id: c.card_printing.card_printing_id,
+      card_name: card.name,
+      edition_name: edition.name,
+      edition_code: edition.code ?? null,
+      rarity_tier_name: c.card_printing.rarity_tier?.name ?? null,
+      legal_status: c.card_printing.legal_status ?? null,
+      is_starting_gold: c.is_starting_gold,
+      card_type_name: card.card_type.name,
+      card_type_code: card.card_type.code ?? null,
+      cost: card.cost,
+      race_name: card.race?.name ?? null,
+      has_ability: card.has_ability,
+      ability_text: abilityTextByCardId.get(card.card_id) ?? null,
+      is_unique: card.is_unique,
+      tags,
+    };
+  });
 
   return {
     deck_name: deck.name,

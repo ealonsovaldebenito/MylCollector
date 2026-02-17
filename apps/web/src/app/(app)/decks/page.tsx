@@ -1,8 +1,17 @@
+import type { Metadata } from 'next';
+
+import { MyDecksDashboard } from '@/components/decks/my-decks-dashboard';
+
+export const metadata: Metadata = {
+  title: 'Mis Mazos | MYL',
+  description: 'Visualiza y gestiona tus mazos con estadísticas rápidas.',
+};
+
 export default function DecksPage() {
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Mis Mazos</h1>
-      <p className="text-muted-foreground">Lista de mazos del usuario — placeholder</p>
+    <div className="-m-6 h-[calc(100vh-3.5rem)]">
+      <MyDecksDashboard />
     </div>
   );
 }
+

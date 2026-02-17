@@ -1,6 +1,6 @@
 'use client';
 
-import type { DeckCardSlot } from '@/hooks/use-deck-builder';
+import type { CardPrintingData, DeckCardSlot } from '@/hooks/use-deck-builder';
 import { BuilderDeckCard } from './builder-deck-card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -24,6 +24,7 @@ interface BuilderDeckEditorProps {
   onAddCard: (printingId: string) => void;
   onRemoveCard: (printingId: string) => void;
   onSetStartingGold: (printingId: string) => void;
+  onReplacePrinting: (fromPrintingId: string, toPrinting: CardPrintingData) => void;
 }
 
 export function BuilderDeckEditor({
@@ -35,6 +36,7 @@ export function BuilderDeckEditor({
   onAddCard,
   onRemoveCard,
   onSetStartingGold,
+  onReplacePrinting,
 }: BuilderDeckEditorProps) {
   return (
     <div className="flex h-full flex-col">
@@ -114,6 +116,7 @@ export function BuilderDeckEditor({
                       onAdd={() => onAddCard(slot.card_printing_id)}
                       onRemove={() => onRemoveCard(slot.card_printing_id)}
                       onSetStartingGold={() => onSetStartingGold(slot.card_printing_id)}
+                      onReplacePrinting={(toPrinting) => onReplacePrinting(slot.card_printing_id, toPrinting)}
                     />
                   ))}
                 </div>

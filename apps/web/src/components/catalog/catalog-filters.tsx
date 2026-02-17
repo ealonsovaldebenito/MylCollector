@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { FilterX, Layers, BookOpen, Zap, Users, Gem, Shield, Coins, Hash } from 'lucide-react';
+import { FilterX, Layers, BookOpen, Zap, Users, Gem, Shield, Coins, Hash, DollarSign } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface FilterValues {
@@ -21,6 +21,9 @@ export interface FilterValues {
   cost_min?: number;
   cost_max?: number;
   tag_slug?: string;
+  price_min?: number;
+  price_max?: number;
+  has_price?: boolean;
 }
 
 interface CatalogFiltersProps {
@@ -70,6 +73,15 @@ export function CatalogFilters({
       } else {
         delete next[key];
       }
+    } else if (key === 'price_min' || key === 'price_max') {
+      const num = parseInt(value, 10);
+      if (!isNaN(num)) {
+        next[key] = num;
+      } else {
+        delete next[key];
+      }
+    } else if (key === 'has_price') {
+      next[key] = value === 'true';
     } else if (key === 'legal_status') {
       next[key] = value as LegalStatus;
     } else {
@@ -281,6 +293,55 @@ export function CatalogFilters({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Precio en tiendas */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-1.5">
+          <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Precio
+          </h4>
+        </div>
+
+        <div className="space-y-2.5">
+          {/* Only with price */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filters.has_price ?? false}
+              onChange={(e) => update('has_price', e.target.checked ? 'true' : undefined)}
+              className="rounded border-border"
+            />
+            <span className="text-xs text-foreground">Solo con precio disponible</span>
+          </label>
+
+          {/* Price range */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Rango de precio (CLP)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                placeholder="Min"
+                value={filters.price_min ?? ''}
+                onChange={(e) => update('price_min', e.target.value || undefined)}
+                className="h-9 text-xs"
+              />
+              <span className="text-xs text-muted-foreground">-</span>
+              <Input
+                type="number"
+                min={0}
+                placeholder="Max"
+                value={filters.price_max ?? ''}
+                onChange={(e) => update('price_max', e.target.value || undefined)}
+                className="h-9 text-xs"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

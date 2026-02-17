@@ -9,9 +9,10 @@ interface CardImageProps {
   alt: string;
   className?: string;
   priority?: boolean;
+  fit?: 'cover' | 'contain';
 }
 
-export function CardImage({ src, alt, className, priority = false }: CardImageProps) {
+export function CardImage({ src, alt, className, priority = false, fit = 'cover' }: CardImageProps) {
   const [hasError, setHasError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -40,7 +41,8 @@ export function CardImage({ src, alt, className, priority = false }: CardImagePr
         onLoad={() => setIsLoaded(true)}
         onError={() => setHasError(true)}
         className={cn(
-          'h-full w-full object-cover transition-opacity duration-300',
+          'h-full w-full transition-opacity duration-300',
+          fit === 'contain' ? 'object-contain' : 'object-cover',
           isLoaded ? 'opacity-100' : 'opacity-0',
         )}
       />

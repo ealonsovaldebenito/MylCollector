@@ -11,13 +11,17 @@
 |------|--------|---------------------|
 | Documentacion base | Completa | 2026-02-04 |
 | Scaffold / Monorepo | Completado | 2026-02-03 |
-| Data Model SQL (03) | Migraciones creadas (10 archivos) | 2026-02-05 |
+| Data Model SQL (03) | Migraciones creadas (10+4 archivos) | 2026-02-16 |
 | Validation Engine (04) | ✅ Implementado | 2026-02-15 |
 | Product Spec (01) | Completo | 2026-02-04 |
 | Architecture (02) | Completo | 2026-02-04 |
 | Auth / Supabase | Scaffold listo | 2026-02-03 |
-| Backend API | ✅ Catalogos + Cartas + Mazos + Validacion | 2026-02-15 |
-| Frontend UI | ✅ Catalogo + Builder completo | 2026-02-15 |
+| Backend API | ✅ Catalogos + Cartas + Mazos + Validacion + Tiendas/Scraping | 2026-02-16 |
+| Frontend UI | ✅ Catalogo + Builder + Admin Tiendas + Precios en catalogo + Admin Cartas (tabs + links tiendas) | 2026-02-17 |
+| Tiendas / Scraping | ✅ Implementado (schemas, servicios, API, UI admin, precios en catalogo) | 2026-02-16 |
+| Banlists / Historial | ✅ SQL + Schemas + Servicios + API + Admin UI | 2026-02-16 |
+| Oracles / Strategy | ✅ SQL + Schemas + Servicios + API | 2026-02-16 |
+| Card Form Redesign | ✅ Implementado (printings inline + preview + tabs) | 2026-02-17 |
 | Testing | Setup + smoke tests | 2026-02-03 |
 
 ---
@@ -232,23 +236,75 @@ Completar `04_DECK_VALIDATION_ENGINE.md` e implementar el motor de validacion.
 
 ---
 
-## Fase 6: Export/Import (PENDIENTE)
+## Fase 6: Export/Import (COMPLETADA ✅)
 
-### Hitos esperados
-- [ ] Export TXT/CSV/JSON
-- [ ] Export PDF
-- [ ] Import TXT/CSV con resolucion de ambiguedad
-- [ ] Audit log para export/import
+Ver detalle en seccion "2026-02-15 — FASE 6: Export/Import de Mazos COMPLETO" abajo.
 
 ---
 
-## Fase 7: Precios y Comunidad (PENDIENTE)
+## Fase 7: Tiendas, Scraping y Precios (COMPLETADA ✅)
 
-### Hitos esperados
-- [ ] Community price submissions con cooldown
-- [ ] Votos y consenso
-- [ ] Scraping pipeline
-- [ ] Historial de precios
+**Fecha:** 2026-02-16
+
+### Migraciones SQL adicionales
+- `20260216100000_stores_improvements.sql` — Mejoras a stores, store_printing_links, scrape_jobs
+- `20260216100001_banlist_history.sql` — ban_list_revisions, ban_list_entries, format_card_limits upgrade
+- `20260216100002_oracles_and_strategy.sql` — card_oracle_texts, deck_strategy_notes
+
+### Schemas Zod (@myl/shared)
+- `store.ts` — createStoreSchema, updateStoreSchema, createStorePrintingLinkSchema, storeSchema, storePrintingLinkSchema
+- `scraping.ts` — triggerScrapeSchema, scrapeJobSchema, scrapeJobItemSchema
+- `banlist.ts` — createBanListRevisionSchema, banListEntryInputSchema, updateFormatCardLimitSchema
+- `oracle.ts` — oracleTextSchema, createOracleTextSchema
+
+### Servicios backend
+- **stores.service.ts** — CRUD tiendas, links tienda-printing, busqueda de tiendas por printing
+- **scraping.service.ts** — triggerScrape (con auto-expiracion de jobs viejos), executeScrapeJob, processScrapedItems, getScrapeJobs/Job, getPriceHistoryByStore
+- **scraper-engines.ts** — Motores de scraping: tiendanube, jumpseller, woocommerce, generic_og. fetchAndScrape dispatcher.
+- **banlists.service.ts** — getFormatCardLimits, upsertFormatCardLimit, deleteFormatCardLimit, getBanListRevisions, createBanListRevision
+- **oracles.service.ts** — getOracleTexts, createOracleText, getLatestOracle
+
+### API Endpoints
+- `GET/POST /api/v1/admin/stores` — CRUD tiendas
+- `GET/PUT/DELETE /api/v1/admin/stores/[storeId]` — Detalle/actualizar/eliminar tienda
+- `GET/POST /api/v1/admin/stores/[storeId]/links` — Links tienda-printing
+- `DELETE /api/v1/admin/stores/[storeId]/links/[linkId]` — Eliminar link
+- `POST /api/v1/admin/stores/[storeId]/scrape` — Trigger scraping manual
+- `GET /api/v1/admin/stores/[storeId]/scrape/jobs` — Historial de jobs
+- `GET/POST /api/v1/admin/banlists/formats/[formatId]/limits` — Limites por formato
+- `DELETE /api/v1/admin/banlists/formats/[formatId]/limits/[cardId]` — Eliminar limite
+- `GET/POST /api/v1/admin/banlists/formats/[formatId]/revisions` — Historial revisiones
+- `GET/POST /api/v1/admin/oracles/[cardId]` — Textos Oracle
+- `GET /api/v1/prices/[printingId]/stores` — Precios por printing
+- `POST /api/v1/prices/consensus` — Precio consenso
+- `GET /api/v1/catalog/currencies` — Monedas disponibles
+- `GET /api/v1/catalog/editions/[editionId]/printings` — Printings por edicion
+- `GET /api/v1/tags` — Tags/mecanicas
+
+### UI Admin
+- **admin/stores/page.tsx** — Panel split: lista tiendas + links panel con agregar/eliminar links, busqueda de cartas, scraping manual con ejecucion real, historial de jobs
+- **admin/banlists/page.tsx** — Gestion de limites por formato: Tab Gestion (prohibidas/restringidas/limitadas), Tab Historial de revisiones, Tab Legal Status por printing
+
+### Integracion Catalogo
+- **Precios en card-tile.tsx** — Badge verde con precio minimo en CLP
+- **Precios en catalog-filters.tsx** — Filtros: rango de precio (min/max CLP), checkbox "Solo con precio disponible"
+- **Precios en cards.service.ts** — Batch-fetch de store_min_price en searchCards, pre-filtro por precio
+- **Precios en catalog-grid.tsx** — storeMinPrice pasado a cada CardTile
+- **Precios en detalle de carta** — PriceSection con precios por tienda, historial
+
+### Hitos completados
+- [x] Migraciones SQL (stores improvements, banlist history, oracles)
+- [x] Schemas Zod (store, scraping, banlist, oracle)
+- [x] Tipos TypeScript actualizados en packages/db
+- [x] Servicios backend (stores, scraping, scraper-engines, banlists, oracles)
+- [x] API endpoints (15+ endpoints)
+- [x] Admin UI (tiendas con links + scraping, banlists con historial)
+- [x] Precios en catalogo (badge en tiles, filtros de precio)
+- [x] 3 motores de scraping (tiendanube, jumpseller, woocommerce)
+- [x] Auto-expiracion de jobs stuck (>10 min)
+- [ ] Community price submissions con cooldown (pendiente)
+- [ ] Votos y consenso (pendiente)
+- [ ] Grafico de evolucion de precios historico (pendiente)
 
 ---
 
@@ -356,7 +412,7 @@ Completar `04_DECK_VALIDATION_ENGINE.md` e implementar el motor de validacion.
 #### Fase 7: Componentes UI del builder (10+ componentes)
 - **BuilderWorkspace:** Layout principal 3 columnas (desktop) / tabs (mobile)
   - Top bar: nombre, selector formato, boton guardar, cerrar
-  - Panel izq: BuilderCardBrowser (busqueda, filtros, scroll infinito, boton +)
+  - Panel izq: BuilderCardBrowser (busqueda, filtros: tipo/raza/era/edición, scroll infinito, boton +)
   - Panel centro: BuilderDeckEditor (agrupado por tipo, qty controls, oro inicial, contador X/50)
   - Panel der: BuilderValidationPanel + BuilderStatsPanel
 - **BuilderDeckCard:** Item individual con imagen mini, nombre, edicion, qty controls (+/-), boton oro (Star)
@@ -550,3 +606,43 @@ Completar `04_DECK_VALIDATION_ENGINE.md` e implementar el motor de validacion.
 
 ---
 
+### 2026-02-16 — Tiendas, Scraping y Precios COMPLETO ✅
+- **Contexto:** Implementar sistema completo de tiendas con scraping de precios, banlists con historial, y textos oracle
+- **Alcance:** 4 migraciones SQL, 6+ schemas Zod, 6+ servicios, 15+ endpoints API, 2+ paginas admin
+- **Cambios clave:**
+  - Motores de scraping (tiendanube, jumpseller, woocommerce) con fetch + parse automatico
+  - Admin UI de tiendas con panel de links, busqueda de cartas, trigger manual de scraping
+  - Precios integrados en catalogo (badge en tiles, filtros de precio min/max/has_price)
+  - Banlists con historial de revisiones y gestion por formato
+  - Auto-expiracion de scrape jobs stuck (>10 min)
+  - Fix: currencies API 500 (columna is_active no existia)
+  - Fix: signal abort error en user-context (AbortController + mounted flag)
+  - Fix: scrape job "already active" (auto-expire stale jobs antes de verificar)
+
+---
+
+### 2026-02-17 - Admin Cartas: rediseno + links de tiendas por impresion (COMPLETO)
+
+- **Contexto:** Mejorar uso de espacio e informacion en edicion de cartas y agregar gestion de links de tiendas por impresion (reverse de `/admin/stores`).
+- **Resultado:**
+  - UI optimizada en `CardForm` con tabs: **Datos / Impresiones / Tiendas**.
+  - Links de tiendas ahora se gestionan desde cartas por `card_printing_id` (cada impresion puede tener distinto valor).
+  - Se muestra informacion clave (conteos, legal status, rango de consenso) para edicion mas rapida.
+- **APIs alineadas:**
+  - Reverse por impresion: `GET|POST /api/v1/admin/printings/:printingId/store-links`.
+  - Delete alineado a Stores: `DELETE /api/v1/admin/stores/:storeId/links/:linkId`.
+
+---
+
+## Plan proximo: Admin Cartas/Tiendas (iteracion)
+
+### Objetivo
+Acelerar la gestion de links/precios sin salir del editor de cartas.
+
+### Backlog propuesto
+- [ ] Boton "Scrapear ahora" desde tab **Tiendas** (reusar endpoint de scrape por store).
+- [ ] Mostrar ultimo scrape/estado por link (ya existe `last_scraped_at`).
+- [ ] Busqueda rapida de tiendas dentro del selector.
+- [ ] (Opcional) Endpoint ergonomia: `DELETE /api/v1/admin/printings/:printingId/store-links/:linkId`.
+
+---

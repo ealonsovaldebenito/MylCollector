@@ -24,8 +24,29 @@ export const validationMessageSchema = z.object({
 
 export const deckComputedStatsSchema = z.object({
   total_cards: z.number().int(),
+
+  // Curva de coste (excluye cartas de tipo Oro)
   cost_histogram: z.record(z.number().int()),
+
+  // Curva de oro (usa el campo cost como "valor de oro" si existe)
+  gold_histogram: z.record(z.number().int()).optional(),
+
+  // Promedios ponderados por cantidad
+  avg_cost: z.number().nullable().optional(),
+  avg_gold_value: z.number().nullable().optional(),
+  avg_cost_by_type: z
+    .record(
+      z.object({
+        qty: z.number().int(),
+        costed_qty: z.number().int(),
+        avg: z.number().nullable(),
+      }),
+    )
+    .optional(),
+
   type_distribution: z.record(z.number().int()),
+
+  // Nota: razas solo aplican a Aliados
   race_distribution: z.record(z.number().int()),
   rarity_distribution: z.record(z.number().int()),
 });

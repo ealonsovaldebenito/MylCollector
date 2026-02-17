@@ -2,11 +2,22 @@ import type { ValidationResult } from '../schemas/validation.js';
 
 export interface DeckExportCard {
   qty: number;
+  card_id: string;
+  card_printing_id: string;
   card_name: string;
   edition_name: string;
+  edition_code: string | null;
+  rarity_tier_name: string | null;
+  legal_status: string | null;
   is_starting_gold: boolean;
   card_type_name: string;
+  card_type_code: string | null;
   cost: number | null;
+  race_name: string | null;
+  has_ability: boolean;
+  ability_text: string | null;
+  is_unique: boolean;
+  tags: string[];
 }
 
 export interface DeckExportData {
@@ -92,8 +103,29 @@ export function formatDeckAsTxt(data: DeckExportData): string {
     });
 
     for (const card of sortedCards) {
-      const goldMarker = card.is_starting_gold ? ' ⭐' : '';
-      lines.push(`  ${card.qty}x ${card.card_name} [${card.edition_name}]${goldMarker}`);
+      const goldMarker = card.is_starting_gold ? ' [ORO INICIAL]' : '';
+      const costMarker = card.cost !== null ? ` C:${card.cost}` : '';
+      const uniqueMarker = card.is_unique ? ' ÚNICA' : '';
+      const abilityMarker = card.has_ability ? ' HABILIDAD' : '';
+      const raceMarker = card.race_name ? ` · ${card.race_name}` : '';
+      const tagsMarker = card.tags.length > 0 ? ` {${card.tags.slice(0, 6).join(', ')}}` : '';
+      lines.push(
+        `  ${card.qty}x ${card.card_name} [${card.edition_name}]${costMarker}${raceMarker}${uniqueMarker}${abilityMarker}${goldMarker}${tagsMarker}`,
+      );
+
+      const abilityText = (card.ability_text ?? '').trim();
+      if (abilityText) {
+        const normalized = abilityText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const abilityLines = normalized
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+
+        if (abilityLines.length > 0) {
+          lines.push(`  - Habilidad:`);
+          for (const l of abilityLines) lines.push(`    - ${l}`);
+        }
+      }
     }
 
     lines.push('');

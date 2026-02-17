@@ -258,3 +258,78 @@ export async function getPriceHistory(supabase: Client, cardPrintingId: string) 
     })) ?? []
   );
 }
+
+export interface ConsensusPriceItem {
+  card_printing_id: string;
+  consensus_price: number;
+  currency_code: string;
+  currency_symbol: string;
+  computed_at: string;
+}
+
+/**
+ * Bulk: latest consensus prices for many printings.
+ *
+ * Notes:
+ * - Returns the latest row (by computed_at desc) per card_printing_id.
+ * - If the consensus table is not available (schema mismatch), returns [].
+ */
+export async function getConsensusPricesForPrintings(
+  supabase: Client,
+  cardPrintingIds: string[],
+): Promise<ConsensusPriceItem[]> {
+  const ids = Array.from(new Set(cardPrintingIds)).filter(Boolean);
+  if (ids.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('card_price_consensus')
+    .select('card_printing_id, consensus_price, currency_id, computed_at')
+    .in('card_printing_id', ids)
+    .order('computed_at', { ascending: false });
+
+  if (error) {
+    // Missing relation/table in some environments
+    if (error.code === '42P01') return [];
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar precios');
+  }
+
+  const latestByPrinting = new Map<
+    string,
+    { card_printing_id: string; consensus_price: number; currency_id: string; computed_at: string }
+  >();
+
+  for (const row of data ?? []) {
+    if (!latestByPrinting.has(row.card_printing_id)) {
+      latestByPrinting.set(row.card_printing_id, {
+        card_printing_id: row.card_printing_id,
+        consensus_price: Number(row.consensus_price),
+        currency_id: row.currency_id,
+        computed_at: row.computed_at,
+      });
+    }
+  }
+
+  const currencyIds = Array.from(
+    new Set(Array.from(latestByPrinting.values()).map((r) => r.currency_id).filter(Boolean)),
+  );
+
+  const { data: currencies } = await supabase
+    .from('currencies')
+    .select('currency_id, code, symbol')
+    .in('currency_id', currencyIds);
+
+  const currencyMap = new Map(
+    (currencies ?? []).map((c) => [c.currency_id, { code: c.code, symbol: c.symbol }]),
+  );
+
+  return Array.from(latestByPrinting.values()).map((row) => {
+    const currency = currencyMap.get(row.currency_id);
+    return {
+      card_printing_id: row.card_printing_id,
+      consensus_price: row.consensus_price,
+      currency_code: currency?.code ?? 'USD',
+      currency_symbol: currency?.symbol ?? '$',
+      computed_at: row.computed_at,
+    };
+  });
+}

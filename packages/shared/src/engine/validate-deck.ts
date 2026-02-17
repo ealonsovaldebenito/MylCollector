@@ -59,32 +59,88 @@ function sortMessages(messages: ValidationMessage[]): ValidationMessage[] {
 
 function computeStats(cards: DeckCardEntry[]): DeckComputedStats {
   const cost_histogram: Record<string, number> = {};
+  const gold_histogram: Record<string, number> = {};
   const type_distribution: Record<string, number> = {};
   const race_distribution: Record<string, number> = {};
   const rarity_distribution: Record<string, number> = {};
   let total_cards = 0;
 
+  let costSum = 0;
+  let costQty = 0;
+  let goldSum = 0;
+  let goldQty = 0;
+
+  const avg_cost_by_type: Record<string, { qty: number; costed_qty: number; cost_sum: number }> = {};
+
   for (const c of cards) {
     total_cards += c.qty;
 
     // Cost histogram
-    const costKey = c.cost !== null ? String(c.cost) : 'N/A';
-    cost_histogram[costKey] = (cost_histogram[costKey] ?? 0) + c.qty;
+    const isGold = c.card_type_code === 'ORO';
+    if (!isGold) {
+      const costKey = c.cost !== null ? String(c.cost) : 'N/A';
+      cost_histogram[costKey] = (cost_histogram[costKey] ?? 0) + c.qty;
+
+      if (c.cost !== null) {
+        costSum += c.cost * c.qty;
+        costQty += c.qty;
+      }
+    } else {
+      const goldKey = c.cost !== null ? String(c.cost) : 'N/A';
+      gold_histogram[goldKey] = (gold_histogram[goldKey] ?? 0) + c.qty;
+
+      if (c.cost !== null) {
+        goldSum += c.cost * c.qty;
+        goldQty += c.qty;
+      }
+    }
 
     // Type distribution
     const typeName = c.card_type_name;
     type_distribution[typeName] = (type_distribution[typeName] ?? 0) + c.qty;
 
+    // Avg cost by type (non-gold only)
+    const typeAgg = (avg_cost_by_type[typeName] ??= { qty: 0, costed_qty: 0, cost_sum: 0 });
+    typeAgg.qty += c.qty;
+    if (!isGold && c.cost !== null) {
+      typeAgg.costed_qty += c.qty;
+      typeAgg.cost_sum += c.cost * c.qty;
+    }
+
     // Race distribution
-    const raceName = c.race_name ?? 'Sin raza';
-    race_distribution[raceName] = (race_distribution[raceName] ?? 0) + c.qty;
+    if (c.card_type_code === 'ALIADO') {
+      const raceName = c.race_name ?? 'Sin raza';
+      race_distribution[raceName] = (race_distribution[raceName] ?? 0) + c.qty;
+    }
 
     // Rarity distribution
     const rarityName = c.rarity_name ?? 'Sin rareza';
     rarity_distribution[rarityName] = (rarity_distribution[rarityName] ?? 0) + c.qty;
   }
 
-  return { total_cards, cost_histogram, type_distribution, race_distribution, rarity_distribution };
+  const avg_cost = costQty > 0 ? Number((costSum / costQty).toFixed(2)) : null;
+  const avg_gold_value = goldQty > 0 ? Number((goldSum / goldQty).toFixed(2)) : null;
+
+  const avg_cost_by_type_out: Record<string, { qty: number; costed_qty: number; avg: number | null }> = {};
+  for (const [typeName, agg] of Object.entries(avg_cost_by_type)) {
+    avg_cost_by_type_out[typeName] = {
+      qty: agg.qty,
+      costed_qty: agg.costed_qty,
+      avg: agg.costed_qty > 0 ? Number((agg.cost_sum / agg.costed_qty).toFixed(2)) : null,
+    };
+  }
+
+  return {
+    total_cards,
+    cost_histogram,
+    gold_histogram,
+    avg_cost,
+    avg_gold_value,
+    avg_cost_by_type: avg_cost_by_type_out,
+    type_distribution,
+    race_distribution,
+    rarity_distribution,
+  };
 }
 
 /**
@@ -208,6 +264,27 @@ export function validateDeck(config: FormatConfig, cards: DeckCardEntry[]): Vali
         entity_ref: { card_printing_id: c.card_printing_id, card_id: c.card_id },
         context_json: { card_name: c.card_name, legal_status: c.legal_status },
       });
+    }
+
+    // --- LEGAL_STATUS_RESTRICTED ---
+    if (c.legal_status === 'RESTRICTED') {
+      // Check if there's a specific override in format_card_limits
+      const hasFormatOverride = config.card_limits.has(c.card_id);
+      if (!hasFormatOverride) {
+        // Default restriction: max 1 copy when legal_status is RESTRICTED
+        const cardInfo = cardQtyMap.get(c.card_id);
+        if (cardInfo && cardInfo.total > 1) {
+          messages.push({
+            rule_id: 'LEGAL_STATUS_RESTRICTED',
+            rule_version: 1,
+            severity: 'BLOCK',
+            message: `"${c.card_name}" esta restringida (maximo 1 copia).`,
+            hint: 'Reduce a 1 copia o retira esta carta.',
+            entity_ref: { card_printing_id: c.card_printing_id, card_id: c.card_id },
+            context_json: { card_name: c.card_name, legal_status: c.legal_status, found: cardInfo.total },
+          });
+        }
+      }
     }
   }
 

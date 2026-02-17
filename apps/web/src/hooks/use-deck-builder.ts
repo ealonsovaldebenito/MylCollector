@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import type { LegalStatus, ValidationResult } from '@myl/shared';
+import type { LegalStatus, ValidationResult, Visibility } from '@myl/shared';
 
 // ============================================================================
 // Types
@@ -40,10 +40,18 @@ export interface DeckBuilderActions {
   addCard: (printing: CardPrintingData) => void;
   removeCard: (printingId: string) => void;
   setQty: (printingId: string, qty: number) => void;
+  replacePrinting: (fromPrintingId: string, toPrinting: CardPrintingData) => void;
   setStartingGold: (printingId: string) => void;
   clearStartingGold: () => void;
   setFormat: (formatId: string) => void;
+  setEditionId: (editionId: string | null) => void;
+  setRaceId: (raceId: string | null) => void;
   setName: (name: string) => void;
+  setDescription: (description: string) => void;
+  setStrategy: (strategy: string) => void;
+  setCoverImageUrl: (url: string) => void;
+  setTagIds: (tagIds: string[]) => void;
+  setVisibility: (visibility: Visibility) => void;
   saveDeck: () => Promise<string | null>;
   loadDeck: (deckId: string) => Promise<void>;
   clearDeck: () => void;
@@ -56,6 +64,11 @@ export interface DeckBuilderState {
   formatId: string;
   editionId: string | null;
   raceId: string | null;
+  visibility: Visibility;
+  description: string;
+  strategy: string;
+  coverImageUrl: string;
+  tagIds: string[];
   cards: DeckCardSlot[];
   validation: ValidationResult | null;
   isValidating: boolean;
@@ -97,6 +110,11 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
   const [formatId, setFormatId] = useState(initialFormatId ?? '');
   const [editionId, setEditionId] = useState<string | null>(null);
   const [raceId, setRaceId] = useState<string | null>(null);
+  const [visibility, setVisibilityState] = useState<Visibility>('PRIVATE');
+  const [description, setDescriptionState] = useState<string>('');
+  const [strategy, setStrategyState] = useState<string>('');
+  const [coverImageUrl, setCoverImageUrlState] = useState<string>('');
+  const [tagIds, setTagIdsState] = useState<string[]>([]);
   const [cards, setCards] = useState<DeckCardSlot[]>([]);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -267,6 +285,91 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     setIsDirty(true);
   }, []);
 
+  const replacePrinting = useCallback((fromPrintingId: string, toPrinting: CardPrintingData) => {
+    setCards((prev) => {
+      const from = prev.find((c) => c.card_printing_id === fromPrintingId);
+      if (!from) return prev;
+
+      const toPrintingId = toPrinting.card_printing_id;
+      if (toPrintingId === fromPrintingId) return prev;
+
+      const updatedSlot: DeckCardSlot = {
+        ...from,
+        card_printing_id: toPrintingId,
+        edition: toPrinting.edition,
+        rarity_tier: toPrinting.rarity_tier,
+        image_url: toPrinting.image_url,
+        legal_status: toPrinting.legal_status,
+        card: toPrinting.card,
+      };
+
+      // Remove old slot
+      let next = prev.filter((c) => c.card_printing_id !== fromPrintingId);
+
+      // Merge if target printing already exists
+      const existingTarget = next.find((c) => c.card_printing_id === toPrintingId);
+      if (existingTarget) {
+        next = next.map((c) =>
+          c.card_printing_id === toPrintingId
+            ? {
+              ...c,
+              qty: c.qty + from.qty,
+              is_starting_gold: c.is_starting_gold || from.is_starting_gold,
+            }
+            : c,
+        );
+      } else {
+        next = [...next, updatedSlot];
+      }
+
+      // Preserve "oro inicial" uniqueness
+      if (from.is_starting_gold) {
+        next = next.map((c) => ({
+          ...c,
+          is_starting_gold: c.card_printing_id === toPrintingId,
+        }));
+      }
+
+      return next;
+    });
+    setIsDirty(true);
+  }, []);
+
+  const setDescription = useCallback((next: string) => {
+    setDescriptionState(next);
+    setIsDirty(true);
+  }, []);
+
+  const setStrategy = useCallback((next: string) => {
+    setStrategyState(next);
+    setIsDirty(true);
+  }, []);
+
+  const setCoverImageUrl = useCallback((next: string) => {
+    setCoverImageUrlState(next);
+    setIsDirty(true);
+  }, []);
+
+  const setTagIds = useCallback((next: string[]) => {
+    setTagIdsState(next);
+    setIsDirty(true);
+  }, []);
+
+  const setVisibility = useCallback((next: Visibility) => {
+    setVisibilityState(next);
+    setIsDirty(true);
+  }, []);
+
+  const setEditionIdAction = useCallback((next: string | null) => {
+    setEditionId(next);
+    setIsDirty(true);
+  }, []);
+
+  const setRaceIdAction = useCallback((next: string | null) => {
+    setRaceId(next);
+    setIsDirty(true);
+  }, []);
+
   const saveDeck = useCallback(async (): Promise<string | null> => {
     if (!formatId || !name.trim()) {
       setError('Nombre y formato son requeridos');
@@ -283,7 +386,17 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
         const res = await fetch('/api/v1/decks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, format_id: formatId }),
+          body: JSON.stringify({
+            name,
+            format_id: formatId,
+            edition_id: editionId ?? null,
+            race_id: raceId ?? null,
+            description: description.trim() ? description : undefined,
+            strategy: strategy.trim() ? strategy : undefined,
+            cover_image_url: coverImageUrl.trim() ? coverImageUrl : undefined,
+            tag_ids: tagIds,
+            visibility,
+          }),
         });
         const json = await res.json();
         if (!json.ok) {
@@ -297,7 +410,17 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
         await fetch(`/api/v1/decks/${currentDeckId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, format_id: formatId }),
+          body: JSON.stringify({
+            name,
+            format_id: formatId,
+            edition_id: editionId ?? null,
+            race_id: raceId ?? null,
+            description: description.trim() ? description : null,
+            strategy: strategy.trim() ? strategy : null,
+            cover_image_url: coverImageUrl.trim() ? coverImageUrl : null,
+            tag_ids: tagIds,
+            visibility,
+          }),
         });
       }
 
@@ -330,7 +453,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     } finally {
       setIsSaving(false);
     }
-  }, [deckId, name, formatId, cards]);
+  }, [deckId, name, formatId, editionId, raceId, description, strategy, coverImageUrl, tagIds, visibility, cards]);
 
   const loadDeck = useCallback(async (loadDeckId: string) => {
     setError(null);
@@ -348,6 +471,11 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
       setFormatId(deck.format_id);
       setEditionId(deck.edition_id ?? null);
       setRaceId(deck.race_id ?? null);
+      setDescriptionState(deck.description ?? '');
+      setStrategyState(deck.strategy ?? '');
+      setCoverImageUrlState(deck.cover_image_url ?? '');
+      setTagIdsState(deck.tag_ids ?? []);
+      setVisibilityState((deck.visibility as Visibility) ?? 'PRIVATE');
 
       // Load latest version cards
       if (deck.latest_version) {
@@ -394,6 +522,11 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     setDeckId(null);
     setVersionId(null);
     setNameState('Nuevo mazo');
+    setVisibilityState('PRIVATE');
+    setDescriptionState('');
+    setStrategyState('');
+    setCoverImageUrlState('');
+    setTagIdsState([]);
     setCards([]);
     setValidation(null);
     setIsDirty(false);
@@ -408,6 +541,11 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     formatId,
     editionId,
     raceId,
+    visibility,
+    description,
+    strategy,
+    coverImageUrl,
+    tagIds,
     cards,
     validation,
     isValidating,
@@ -420,10 +558,18 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     addCard,
     removeCard,
     setQty,
+    replacePrinting,
     setStartingGold,
     clearStartingGold,
     setFormat,
+    setEditionId: setEditionIdAction,
+    setRaceId: setRaceIdAction,
     setName,
+    setDescription,
+    setStrategy,
+    setCoverImageUrl,
+    setTagIds,
+    setVisibility,
     saveDeck,
     loadDeck,
     clearDeck,

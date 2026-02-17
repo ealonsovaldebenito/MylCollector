@@ -166,6 +166,78 @@ export {
   type ImportResolution,
 } from './export-import.js';
 
+// Stores
+export {
+  scraperTypeSchema,
+  storeSchema,
+  createStoreSchema,
+  updateStoreSchema,
+  storePrintingLinkSchema,
+  createStorePrintingLinkSchema,
+  updateStorePrintingLinkSchema,
+  type ScraperType,
+  type Store,
+  type CreateStore,
+  type UpdateStore,
+  type StorePrintingLink,
+  type CreateStorePrintingLink,
+  type UpdateStorePrintingLink,
+} from './store.js';
+
+// Scraping
+export {
+  scrapeJobStatusSchema,
+  scrapeTriggeredBySchema,
+  scrapeJobSchema,
+  scrapeJobItemSchema,
+  triggerScrapeSchema,
+  type ScrapeJobStatus,
+  type ScrapeTriggeredBy,
+  type ScrapeJob,
+  type ScrapeJobItem,
+  type TriggerScrape,
+} from './scraping.js';
+
+// Ban lists
+export {
+  banListChangeTypeSchema,
+  banListRevisionSchema,
+  banListEntrySchema,
+  banListEntryInputSchema,
+  createBanListRevisionSchema,
+  upsertFormatCardLimitSchema,
+  formatCardLimitSchema,
+  type BanListChangeType,
+  type BanListRevision,
+  type BanListEntry,
+  type BanListEntryInput,
+  type CreateBanListRevision,
+  type UpsertFormatCardLimit,
+  type FormatCardLimit,
+} from './banlist.js';
+
+// Oracles & Strategy
+export {
+  abilityTypeSchema,
+  strategySectionTypeSchema,
+  cardOracleSchema,
+  createCardOracleSchema,
+  updateCardOracleSchema,
+  deckStrategySectionSchema,
+  createDeckStrategySectionSchema,
+  updateDeckStrategySectionSchema,
+  deckStrategyCardRefSchema,
+  type OracleAbilityType,
+  type StrategySectionType,
+  type CardOracle,
+  type CreateCardOracle,
+  type UpdateCardOracle,
+  type DeckStrategySection,
+  type CreateDeckStrategySection,
+  type UpdateDeckStrategySection,
+  type DeckStrategyCardRef,
+} from './oracle.js';
+
 // Collection
 export {
   cardConditionSchema,

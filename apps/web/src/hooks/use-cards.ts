@@ -32,6 +32,7 @@ interface CardItem {
     race: { race_id: string; name: string; code: string; sort_order: number } | null;
     tags: { tag_id: string; name: string; slug: string }[];
   };
+  store_min_price: number | null;
 }
 
 interface UseCardsResult {
@@ -55,6 +56,9 @@ function buildQueryString(filters: Partial<CardFilters>, cursor?: string): strin
   if (filters.cost_min !== undefined) params.set('cost_min', String(filters.cost_min));
   if (filters.cost_max !== undefined) params.set('cost_max', String(filters.cost_max));
   if (filters.tag_slug) params.set('tag_slug', filters.tag_slug);
+  if (filters.price_min !== undefined) params.set('price_min', String(filters.price_min));
+  if (filters.price_max !== undefined) params.set('price_max', String(filters.price_max));
+  if (filters.has_price) params.set('has_price', 'true');
   if (filters.limit) params.set('limit', String(filters.limit));
   if (cursor) params.set('cursor', cursor);
   return params.toString();

@@ -20,11 +20,21 @@ export interface DeckJsonExport {
   } | null;
   cards: Array<{
     qty: number;
+    card_id: string;
+    card_printing_id: string;
     card_name: string;
     edition_name: string;
+    edition_code: string | null;
     card_type_name: string;
+    card_type_code: string | null;
     cost: number | null;
+    race_name: string | null;
+    has_ability: boolean;
+    ability_text: string | null;
+    is_unique: boolean;
+    tags: string[];
     is_starting_gold: boolean;
+    legal_status: string | null;
   }>;
   exported_at: string;
 }
@@ -35,7 +45,7 @@ export interface DeckJsonExport {
  */
 export function formatDeckAsJson(data: DeckExportData): string {
   const exportData: DeckJsonExport = {
-    version: '1.0',
+    version: '1.1',
     deck_name: data.deck_name,
     format_name: data.format_name,
     total_cards: data.total_cards,
@@ -50,11 +60,21 @@ export function formatDeckAsJson(data: DeckExportData): string {
     computed_stats: data.validation?.computed_stats || null,
     cards: data.cards.map((c) => ({
       qty: c.qty,
+      card_id: c.card_id,
+      card_printing_id: c.card_printing_id,
       card_name: c.card_name,
       edition_name: c.edition_name,
+      edition_code: c.edition_code,
       card_type_name: c.card_type_name,
+      card_type_code: c.card_type_code,
       cost: c.cost,
+      race_name: c.race_name,
+      has_ability: c.has_ability,
+      ability_text: c.ability_text ?? null,
+      is_unique: c.is_unique,
+      tags: c.tags,
       is_starting_gold: c.is_starting_gold,
+      legal_status: c.legal_status,
     })),
     exported_at: data.exported_at.toISOString(),
   };

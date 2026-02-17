@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
 
 interface CardDetailPrintingsProps {
   printings: CardDetail['printings'];
+  selectedPrintingId?: string | null;
+  onSelectPrinting?: (printingId: string) => void;
 }
 
 const STATUS_ICONS: Record<string, typeof Shield> = {
@@ -25,7 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
   DISCONTINUED: 'text-muted-foreground',
 };
 
-export function CardDetailPrintings({ printings }: CardDetailPrintingsProps) {
+export function CardDetailPrintings({ printings, selectedPrintingId, onSelectPrinting }: CardDetailPrintingsProps) {
   if (printings.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
@@ -39,11 +41,17 @@ export function CardDetailPrintings({ printings }: CardDetailPrintingsProps) {
       {printings.map((p) => {
         const Icon = STATUS_ICONS[p.legal_status] ?? Shield;
         const iconColor = STATUS_COLORS[p.legal_status] ?? '';
+        const active = selectedPrintingId ? p.card_printing_id === selectedPrintingId : false;
 
         return (
-          <div
+          <button
             key={p.card_printing_id}
-            className="flex gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-muted/30"
+            type="button"
+            onClick={() => onSelectPrinting?.(p.card_printing_id)}
+            className={cn(
+              'flex gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted/30',
+              active ? 'border-accent/40 bg-accent/5' : '',
+            )}
           >
             <CardImage
               src={p.image_url}
@@ -75,7 +83,7 @@ export function CardDetailPrintings({ printings }: CardDetailPrintingsProps) {
                 </p>
               )}
             </div>
-          </div>
+          </button>
         );
       })}
     </div>

@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@myl/db';
-import type { CreateDeck, UpdateDeck, DeckVersionCardInput, DeckCardEntry } from '@myl/shared';
+import type { CreateDeck, UpdateDeck, DeckVersionCardInput, DeckCardEntry, Visibility } from '@myl/shared';
 
 import { AppError } from '../api/errors';
+import { logger } from '../logger';
 
 /**
  * Decks service — CRUD decks, versions, version cards.
@@ -11,37 +12,206 @@ import { AppError } from '../api/errors';
 
 type Client = SupabaseClient<Database>;
 
+function isPostgrestMissingIdentifier(error: unknown, identifier: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { message?: unknown; details?: unknown; code?: unknown; hint?: unknown };
+  const message = typeof e.message === 'string' ? e.message : '';
+  const details = typeof e.details === 'string' ? e.details : '';
+  const hint = typeof e.hint === 'string' ? e.hint : '';
+  const code = typeof e.code === 'string' ? e.code : '';
+  const haystack = `${message}\n${details}\n${hint}`.toLowerCase();
+  const id = identifier.toLowerCase();
+  // PostgREST can throw "Could not find the '<id>' in the schema cache"
+  return (
+    (haystack.includes(id) &&
+      (haystack.includes('schema cache') || haystack.includes('does not exist') || haystack.includes('could not find'))) ||
+    // relation/table missing
+    (code === '42P01' && haystack.includes(id))
+  );
+}
+
+function isSchemaMismatchError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { message?: unknown; details?: unknown; code?: unknown; hint?: unknown };
+  const message = typeof e.message === 'string' ? e.message : '';
+  const details = typeof e.details === 'string' ? e.details : '';
+  const hint = typeof e.hint === 'string' ? e.hint : '';
+  const code = typeof e.code === 'string' ? e.code : '';
+  const haystack = `${message}\n${details}\n${hint}`.toLowerCase();
+
+  // Postgres: undefined table / column
+  if (code === '42P01' || code === '42703') return true;
+
+  // PostgREST: schema cache / missing relationship / missing resource (varies by version)
+  if (haystack.includes('schema cache')) return true;
+  if (haystack.includes('could not find') && (haystack.includes('relationship') || haystack.includes('table') || haystack.includes('column'))) {
+    return true;
+  }
+
+  return false;
+}
+
+export interface DeckFormatRef {
+  format_id: string;
+  name: string;
+  code: string;
+}
+
+export interface DeckListItem {
+  deck_id: string;
+  user_id: string;
+  format_id: string;
+  edition_id: string | null;
+  race_id: string | null;
+  name: string;
+  description: string | null;
+  strategy: string | null;
+  cover_image_url: string | null;
+  visibility: Visibility;
+  created_at: string;
+  updated_at: string;
+  format: DeckFormatRef;
+  tag_ids: string[];
+}
+
+export interface DeckLatestVersionRef {
+  deck_version_id: string;
+  deck_id: string;
+  version_number: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface DeckDetail extends DeckListItem {
+  latest_version: DeckLatestVersionRef | null;
+}
+
 /**
  * Get all decks for a user.
  */
 export async function getUserDecks(supabase: Client, userId: string) {
-  const { data, error } = await supabase
-    .from('decks')
-    .select(`
-      deck_id, user_id, format_id, name, description, visibility, created_at, updated_at,
-      format:formats!inner(format_id, name, code)
-    `)
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
+  const selectFull = `
+    deck_id, user_id, format_id, edition_id, race_id, name, description, strategy, cover_image_url, visibility, created_at, updated_at,
+    deck_tags(tag_id),
+    format:formats!inner(format_id, name, code)
+  `;
 
-  if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar mazos');
-  return data;
+  const selectNoTags = `
+    deck_id, user_id, format_id, edition_id, race_id, name, description, strategy, cover_image_url, visibility, created_at, updated_at,
+    format:formats!inner(format_id, name, code)
+  `;
+
+  const selectNoExtras = `
+    deck_id, user_id, format_id, edition_id, race_id, name, description, visibility, created_at, updated_at,
+    format:formats!inner(format_id, name, code)
+  `;
+
+  const selectLegacy = `
+    deck_id, user_id, format_id, name, description, visibility, created_at, updated_at,
+    format:formats!inner(format_id, name, code)
+  `;
+
+  const attempts = [selectFull, selectNoTags, selectNoExtras, selectLegacy];
+
+  let lastError: unknown = null;
+  for (const sel of attempts) {
+    const { data, error } = await supabase
+      .from('decks')
+      .select(sel)
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      lastError = error;
+      const missingDeckTags = isPostgrestMissingIdentifier(error, 'deck_tags');
+      const missingStrategy = isPostgrestMissingIdentifier(error, 'strategy');
+      const missingCover = isPostgrestMissingIdentifier(error, 'cover_image_url');
+      const missingEdition = isPostgrestMissingIdentifier(error, 'edition_id');
+      const missingRace = isPostgrestMissingIdentifier(error, 'race_id');
+
+      if (missingDeckTags || missingStrategy || missingCover || missingEdition || missingRace || isSchemaMismatchError(error)) {
+        logger.warn({
+          scope: 'decks.getUserDecks',
+          fallback: true,
+          user_id: userId,
+          select: sel.replace(/\s+/g, ' ').trim().slice(0, 240),
+          supabase_error: error,
+        });
+        continue;
+      }
+
+      logger.error({
+        scope: 'decks.getUserDecks',
+        user_id: userId,
+        select: sel.replace(/\s+/g, ' ').trim().slice(0, 240),
+        supabase_error: error,
+      });
+      throw new AppError('INTERNAL_ERROR', 'Error al cargar mazos');
+    }
+
+    type DeckTagsRef = { tag_id: string };
+    return (data ?? []).map((row) => {
+      const deckTags = (row as unknown as { deck_tags?: DeckTagsRef[] | null }).deck_tags ?? [];
+      return {
+        ...(row as unknown as Omit<DeckListItem, 'tag_ids'>),
+        tag_ids: deckTags.map((t) => t.tag_id),
+      } satisfies DeckListItem;
+    }) as DeckListItem[];
+  }
+
+  logger.error({
+    scope: 'decks.getUserDecks',
+    user_id: userId,
+    supabase_error: lastError,
+    message: 'All select fallbacks failed',
+  });
+  throw new AppError('INTERNAL_ERROR', 'Error al cargar mazos');
 }
 
 /**
  * Get a single deck with its latest version.
  */
-export async function getDeck(supabase: Client, deckId: string) {
-  const { data: deck, error: deckErr } = await supabase
-    .from('decks')
-    .select(`
-      deck_id, user_id, format_id, name, description, visibility, created_at, updated_at,
-      format:formats!inner(format_id, name, code)
-    `)
-    .eq('deck_id', deckId)
-    .single();
+export async function getDeck(supabase: Client, deckId: string): Promise<DeckDetail> {
+  const selectFull = `
+    deck_id, user_id, format_id, edition_id, race_id, name, description, strategy, cover_image_url, visibility, created_at, updated_at,
+    deck_tags(tag_id),
+    format:formats!inner(format_id, name, code)
+  `;
 
-  if (deckErr || !deck) throw new AppError('NOT_FOUND', 'Mazo no encontrado');
+  const selectNoTags = `
+    deck_id, user_id, format_id, edition_id, race_id, name, description, strategy, cover_image_url, visibility, created_at, updated_at,
+    format:formats!inner(format_id, name, code)
+  `;
+
+  const selectNoExtras = `
+    deck_id, user_id, format_id, edition_id, race_id, name, description, visibility, created_at, updated_at,
+    format:formats!inner(format_id, name, code)
+  `;
+
+  const selectLegacy = `
+    deck_id, user_id, format_id, name, description, visibility, created_at, updated_at,
+    format:formats!inner(format_id, name, code)
+  `;
+
+  const attempts = [selectFull, selectNoTags, selectNoExtras, selectLegacy];
+
+  let deck: unknown = null;
+  for (const sel of attempts) {
+    const { data, error } = await supabase.from('decks').select(sel).eq('deck_id', deckId).single();
+    if (error) {
+      const missingDeckTags = isPostgrestMissingIdentifier(error, 'deck_tags');
+      const missingStrategy = isPostgrestMissingIdentifier(error, 'strategy');
+      const missingCover = isPostgrestMissingIdentifier(error, 'cover_image_url');
+      const missingEdition = isPostgrestMissingIdentifier(error, 'edition_id');
+      const missingRace = isPostgrestMissingIdentifier(error, 'race_id');
+      if (missingDeckTags || missingStrategy || missingCover || missingEdition || missingRace) continue;
+      throw new AppError('NOT_FOUND', 'Mazo no encontrado');
+    }
+    deck = data;
+    break;
+  }
+
+  if (!deck) throw new AppError('NOT_FOUND', 'Mazo no encontrado');
 
   // Get latest version
   const { data: latestVersion } = await supabase
@@ -52,28 +222,47 @@ export async function getDeck(supabase: Client, deckId: string) {
     .limit(1)
     .single();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { ...(deck as any), latest_version: latestVersion ?? null };
+  type DeckTagsRef = { tag_id: string };
+  const row = deck as unknown as Omit<DeckDetail, 'tag_ids' | 'latest_version'> & { deck_tags?: DeckTagsRef[] | null };
+  return {
+    ...(row as unknown as Omit<DeckDetail, 'tag_ids' | 'latest_version'>),
+    tag_ids: (row.deck_tags ?? []).map((t) => t.tag_id),
+    latest_version: (latestVersion ?? null) as DeckLatestVersionRef | null,
+  };
 }
 
 /**
  * Create a new deck.
  */
 export async function createDeck(supabase: Client, userId: string, data: CreateDeck) {
+  const { tag_ids, ...deckData } = data;
   const { data: deck, error } = await supabase
     .from('decks')
     .insert({
       user_id: userId,
-      format_id: data.format_id,
-      name: data.name,
-      description: data.description ?? null,
-      visibility: data.visibility ?? 'PRIVATE',
+      format_id: deckData.format_id,
+      edition_id: deckData.edition_id ?? null,
+      race_id: deckData.race_id ?? null,
+      name: deckData.name,
+      description: deckData.description ?? null,
+      strategy: deckData.strategy ?? null,
+      cover_image_url: deckData.cover_image_url ?? null,
+      visibility: deckData.visibility ?? 'PRIVATE',
     } as never)
-    .select('deck_id, user_id, format_id, name, description, visibility, created_at, updated_at')
+    .select('deck_id, user_id, format_id, edition_id, race_id, name, description, strategy, cover_image_url, visibility, created_at, updated_at')
     .single();
 
   if (error || !deck) throw new AppError('INTERNAL_ERROR', 'Error al crear mazo');
-  return deck;
+
+  if (tag_ids && tag_ids.length > 0) {
+    const rows = tag_ids.map((tag_id) => ({ deck_id: deck.deck_id, tag_id }));
+    const { error: tagErr } = await supabase.from('deck_tags').insert(rows as never);
+    if (tagErr && !isPostgrestMissingIdentifier(tagErr, 'deck_tags')) {
+      throw new AppError('INTERNAL_ERROR', 'Error al asignar tags al mazo');
+    }
+  }
+
+  return { ...deck, tag_ids: tag_ids ?? [] };
 }
 
 /**
@@ -83,18 +272,39 @@ export async function updateDeck(supabase: Client, deckId: string, data: UpdateD
   const updatePayload: Record<string, unknown> = {};
   if (data.name !== undefined) updatePayload.name = data.name;
   if (data.format_id !== undefined) updatePayload.format_id = data.format_id;
+  if (data.edition_id !== undefined) updatePayload.edition_id = data.edition_id;
+  if (data.race_id !== undefined) updatePayload.race_id = data.race_id;
   if (data.description !== undefined) updatePayload.description = data.description;
+  if (data.strategy !== undefined) updatePayload.strategy = data.strategy;
+  if (data.cover_image_url !== undefined) updatePayload.cover_image_url = data.cover_image_url;
   if (data.visibility !== undefined) updatePayload.visibility = data.visibility;
 
   const { data: deck, error } = await supabase
     .from('decks')
     .update(updatePayload)
     .eq('deck_id', deckId)
-    .select('deck_id, user_id, format_id, name, description, visibility, created_at, updated_at')
+    .select('deck_id, user_id, format_id, edition_id, race_id, name, description, strategy, cover_image_url, visibility, created_at, updated_at')
     .single();
 
   if (error || !deck) throw new AppError('INTERNAL_ERROR', 'Error al actualizar mazo');
-  return deck;
+
+  const tag_ids = data.tag_ids;
+  if (tag_ids !== undefined) {
+    const { error: delErr } = await supabase.from('deck_tags').delete().eq('deck_id', deckId);
+    if (delErr && !isPostgrestMissingIdentifier(delErr, 'deck_tags')) {
+      throw new AppError('INTERNAL_ERROR', 'Error al actualizar tags del mazo');
+    }
+
+    if (tag_ids.length > 0) {
+      const rows = tag_ids.map((tag_id) => ({ deck_id: deckId, tag_id }));
+      const { error: tagErr } = await supabase.from('deck_tags').insert(rows as never);
+      if (tagErr && !isPostgrestMissingIdentifier(tagErr, 'deck_tags')) {
+        throw new AppError('INTERNAL_ERROR', 'Error al actualizar tags del mazo');
+      }
+    }
+  }
+
+  return { ...deck, tag_ids: tag_ids ?? [] };
 }
 
 /**
@@ -153,6 +363,19 @@ export async function createDeckVersion(
 
   // Update deck's updated_at
   await supabase.from('decks').update({ updated_at: new Date().toISOString() } as never).eq('deck_id', deckId);
+
+  // Keep only the latest 3 versions to avoid data bloat
+  const { data: versionsToDelete } = await supabase
+    .from('deck_versions')
+    .select('deck_version_id')
+    .eq('deck_id', deckId)
+    .order('version_number', { ascending: false })
+    .range(3, 200);
+
+  if (versionsToDelete && versionsToDelete.length > 0) {
+    const ids = versionsToDelete.map((v) => v.deck_version_id);
+    await supabase.from('deck_versions').delete().in('deck_version_id', ids);
+  }
 
   return version;
 }
@@ -277,7 +500,6 @@ export async function resolveCardsForValidation(
     printingMap.set(p.card_printing_id, p);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return cards.map((c) => {
     const p = printingMap.get(c.card_printing_id);
     if (!p) {

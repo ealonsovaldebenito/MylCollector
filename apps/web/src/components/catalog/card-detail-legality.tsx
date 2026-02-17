@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Shield, ShieldAlert, ShieldX, ShieldOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CardDetailBanStatus } from './card-detail-ban-status';
 
 interface CardDetailLegalityProps {
   card: CardDetail;
@@ -125,13 +126,8 @@ export function CardDetailLegality({ card }: CardDetailLegalityProps) {
 
       <Separator />
 
-      {/* Future: Format legality section */}
-      <div className="space-y-2 rounded-md border border-dashed border-border bg-muted/30 p-4">
-        <h4 className="text-sm font-semibold text-muted-foreground">Formatos</h4>
-        <p className="text-xs text-muted-foreground">
-          La información de legalidad por formato estará disponible próximamente.
-        </p>
-      </div>
+      {/* Format ban status */}
+      <CardDetailBanStatus cardId={card.card_id} />
     </div>
   );
 }

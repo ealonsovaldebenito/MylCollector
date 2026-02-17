@@ -21,6 +21,7 @@ interface CardItem {
     card_type: { name: string; code: string };
     tags?: { tag_id: string; name: string; slug: string }[];
   };
+  store_min_price?: number | null;
 }
 
 interface CatalogGridProps {
@@ -90,6 +91,7 @@ export function CatalogGrid({
             legalStatus={item.legal_status}
             cost={item.card.cost}
             allyStrength={item.card.ally_strength}
+            storeMinPrice={item.store_min_price ?? null}
             tags={item.card.tags}
             onClick={() => onCardClick(item.card.card_id)}
             size={gridSize}

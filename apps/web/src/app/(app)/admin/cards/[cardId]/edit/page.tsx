@@ -1,7 +1,15 @@
+/**
+ * /admin/cards/:cardId/edit — Página de edición de carta.
+ * Carga datos del catálogo y detalle de carta, luego renderiza CardForm en modo edit.
+ *
+ * Changelog:
+ *   2026-02-16 — Creación inicial
+ *   2026-02-17 — Mejorar skeleton de carga con layout realista
+ */
+
 'use client';
 
 import { use } from 'react';
-import type { CardPrintingWithRelations } from '@myl/shared';
 import { useCatalogData } from '@/hooks/use-catalog-data';
 import { useCardDetail } from '@/hooks/use-card-detail';
 import { CardForm } from '@/components/admin/card-form';
@@ -15,9 +23,36 @@ export default function EditCardPage({ params }: { params: Promise<{ cardId: str
 
   if (catalogLoading || cardLoading) {
     return (
-      <div className="mx-auto max-w-2xl space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-96 w-full" />
+      <div className="space-y-6">
+        <Skeleton className="h-9 w-64" />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          <div className="space-y-6 lg:col-span-9">
+            <Skeleton className="h-10 w-72" />
+            <div className="rounded-lg border border-border p-6 space-y-4">
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-11 w-full" />
+              <div className="grid grid-cols-2 gap-4">
+                <Skeleton className="h-11 w-full" />
+                <Skeleton className="h-11 w-full" />
+              </div>
+            </div>
+            <div className="rounded-lg border border-border p-6 space-y-4">
+              <Skeleton className="h-6 w-32" />
+              <div className="grid grid-cols-3 gap-4">
+                <Skeleton className="h-11 w-full" />
+                <Skeleton className="h-11 w-full" />
+              </div>
+            </div>
+          </div>
+          <div className="lg:col-span-3">
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <Skeleton className="h-6 w-24" />
+              <Skeleton className="h-[140px] w-full rounded-md" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -39,7 +74,7 @@ export default function EditCardPage({ params }: { params: Promise<{ cardId: str
         editions={editions}
         rarities={rarities}
         mode="edit"
-        printings={card.printings as unknown as CardPrintingWithRelations[]}
+        printings={card.printings}
         initialData={{
           card_id: card.card_id,
           name: card.name,
@@ -54,6 +89,9 @@ export default function EditCardPage({ params }: { params: Promise<{ cardId: str
           text: card.text ?? undefined,
           flavor_text: card.flavor_text ?? undefined,
           tag_ids: card.tags.map((t) => t.tag_id),
+          // Note: these fields are returned by backend even if not in shared CardDetail schema.
+          created_at: (card as unknown as { created_at?: string }).created_at,
+          updated_at: (card as unknown as { updated_at?: string }).updated_at,
         }}
       />
     </div>

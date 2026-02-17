@@ -20,6 +20,7 @@ export default function NewDeckPage() {
   const [formatId, setFormatId] = useState('');
   const [editionId, setEditionId] = useState<string>('');
   const [raceId, setRaceId] = useState<string>('');
+  const [visibility, setVisibility] = useState<'PRIVATE' | 'UNLISTED' | 'PUBLIC'>('PRIVATE');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export default function NewDeckPage() {
           format_id: formatId,
           edition_id: editionId || null,
           race_id: raceId || null,
+          visibility,
         }),
       });
       const json = await res.json();
@@ -89,9 +91,7 @@ export default function NewDeckPage() {
                   <SelectItem key={f.format_id} value={f.format_id}>
                     <div className="flex flex-col">
                       <span>{f.name}</span>
-                      {f.description && (
-                        <span className="text-xs text-muted-foreground">{f.description}</span>
-                      )}
+                      {f.description && <span className="text-xs text-muted-foreground">{f.description}</span>}
                     </div>
                   </SelectItem>
                 ))}
@@ -99,13 +99,30 @@ export default function NewDeckPage() {
             </Select>
           </div>
           <div className="space-y-2">
+            <Label htmlFor="visibility">Visibilidad</Label>
+            <Select value={visibility} onValueChange={(v) => setVisibility(v as typeof visibility)} disabled={isCreating}>
+              <SelectTrigger id="visibility">
+                <SelectValue placeholder="Seleccionar visibilidad" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PRIVATE">Privado</SelectItem>
+                <SelectItem value="UNLISTED">No listado</SelectItem>
+                <SelectItem value="PUBLIC">Público</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="edition">Edición (opcional)</Label>
-            <Select value={editionId} onValueChange={setEditionId} disabled={isCreating}>
+            <Select
+              value={editionId || '__all__'}
+              onValueChange={(v) => setEditionId(v === '__all__' ? '' : v)}
+              disabled={isCreating}
+            >
               <SelectTrigger id="edition">
                 <SelectValue placeholder="Todas las ediciones" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Todas las ediciones</SelectItem>
+                <SelectItem value="__all__">Todas las ediciones</SelectItem>
                 {editions.map((e) => (
                   <SelectItem key={e.edition_id} value={e.edition_id}>
                     {e.name}
@@ -116,12 +133,12 @@ export default function NewDeckPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="race">Raza (opcional)</Label>
-            <Select value={raceId} onValueChange={setRaceId} disabled={isCreating}>
+            <Select value={raceId || '__all__'} onValueChange={(v) => setRaceId(v === '__all__' ? '' : v)} disabled={isCreating}>
               <SelectTrigger id="race">
                 <SelectValue placeholder="Todas las razas" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Todas las razas</SelectItem>
+                <SelectItem value="__all__">Todas las razas</SelectItem>
                 {races.map((r) => (
                   <SelectItem key={r.race_id} value={r.race_id}>
                     {r.name}
@@ -130,22 +147,14 @@ export default function NewDeckPage() {
               </SelectContent>
             </Select>
           </div>
-          {error && (
-            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
-            </div>
-          )}
+          {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
         </CardContent>
         <CardFooter className="flex gap-2">
           <Button variant="outline" onClick={() => router.back()} disabled={isCreating} className="flex-1">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Cancelar
           </Button>
-          <Button
-            onClick={handleCreate}
-            disabled={!name.trim() || !formatId || isCreating}
-            className="flex-1"
-          >
+          <Button onClick={handleCreate} disabled={!name.trim() || !formatId || isCreating} className="flex-1">
             {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Crear Mazo
           </Button>
@@ -154,3 +163,4 @@ export default function NewDeckPage() {
     </div>
   );
 }
+

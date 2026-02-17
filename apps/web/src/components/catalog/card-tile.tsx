@@ -17,6 +17,7 @@ interface CardTileProps {
   legalStatus: string;
   cost: number | null;
   allyStrength: number | null;
+  storeMinPrice: number | null;
   tags?: { tag_id: string; name: string; slug: string }[];
   onClick?: () => void;
   size?: 'normal' | 'large';
@@ -44,6 +45,13 @@ const RARITY_GLOW: Record<string, string> = {
   SECRETA: 'rarity-glow-secreta',
 };
 
+function formatCLP(price: number): string {
+  return new Intl.NumberFormat('es-CL', {
+    style: 'currency', currency: 'CLP',
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
+  }).format(price);
+}
+
 export function CardTile({
   name,
   imageUrl,
@@ -55,6 +63,7 @@ export function CardTile({
   legalStatus,
   cost,
   allyStrength,
+  storeMinPrice,
   tags,
   onClick,
   size = 'large',
@@ -85,6 +94,21 @@ export function CardTile({
       )}
       style={style}
     >
+      {/* Price badge — top right, always visible */}
+      {storeMinPrice !== null && (
+        <div className={cn(
+          'absolute z-10',
+          isLarge ? 'right-2 top-2' : 'right-1.5 top-1.5',
+        )}>
+          <Badge className={cn(
+            'bg-green-600/90 font-mono font-semibold text-white backdrop-blur border-0 shadow-md',
+            isLarge ? 'text-xs px-2 py-0.5' : 'text-[9px] px-1.5 py-0',
+          )}>
+            {formatCLP(storeMinPrice)}
+          </Badge>
+        </div>
+      )}
+
       {/* Favorite button — visible on hover */}
       <div
         role="button"

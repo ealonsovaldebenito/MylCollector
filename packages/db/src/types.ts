@@ -9,6 +9,14 @@ type LegalStatusType = 'LEGAL' | 'RESTRICTED' | 'BANNED' | 'DISCONTINUED';
 type ValidationSeverity = 'BLOCK' | 'WARN' | 'INFO';
 type VisibilityLevel = 'PRIVATE' | 'UNLISTED' | 'PUBLIC';
 type SubmissionStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+type ScraperType = 'manual' | 'api' | 'web_scrape' | 'rss';
+type ScrapeJobStatus = 'pending' | 'running' | 'completed' | 'failed';
+type ScrapeTriggeredBy = 'manual' | 'cron' | 'api';
+type BanListChangeType = 'BANNED' | 'RESTRICTED' | 'RELEASED' | 'MODIFIED';
+type AbilityType = 'ACTIVADA' | 'PASIVA' | 'ESPECIAL' | 'CONTINUA' | 'DISPARADA';
+type StrategySectionType =
+  | 'game_plan' | 'resources' | 'synergies' | 'combos'
+  | 'card_analysis' | 'matchups' | 'mulligan' | 'tips' | 'custom';
 
 export interface Database {
   public: {
@@ -580,16 +588,24 @@ export interface Database {
           format_id: string;
           card_id: string;
           max_qty: number;
+          revision_id: string | null;
+          notes: string | null;
           created_at: string;
+          updated_at: string;
         };
         Insert: {
           format_card_limit_id?: string;
           format_id: string;
           card_id: string;
           max_qty: number;
+          revision_id?: string | null;
+          notes?: string | null;
         };
         Update: {
           max_qty?: number;
+          revision_id?: string | null;
+          notes?: string | null;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -603,6 +619,8 @@ export interface Database {
           race_id: string | null;
           name: string;
           description: string | null;
+          strategy: string | null;
+          cover_image_url: string | null;
           visibility: VisibilityLevel;
           created_at: string;
           updated_at: string;
@@ -615,6 +633,8 @@ export interface Database {
           race_id?: string | null;
           name: string;
           description?: string | null;
+          strategy?: string | null;
+          cover_image_url?: string | null;
           visibility?: VisibilityLevel;
         };
         Update: {
@@ -623,8 +643,27 @@ export interface Database {
           race_id?: string | null;
           name?: string;
           description?: string | null;
+          strategy?: string | null;
+          cover_image_url?: string | null;
           visibility?: VisibilityLevel;
         };
+        Relationships: [];
+      };
+
+      deck_tags: {
+        Row: {
+          deck_tag_id: string;
+          deck_id: string;
+          tag_id: string;
+          created_at: string;
+        };
+        Insert: {
+          deck_tag_id?: string;
+          deck_id: string;
+          tag_id: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
         Relationships: [];
       };
 
@@ -739,6 +778,284 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+
+      // ================================================================
+      // Stores & Scraping
+      // ================================================================
+
+      stores: {
+        Row: {
+          store_id: string;
+          name: string;
+          url: string | null;
+          currency_id: string | null;
+          logo_url: string | null;
+          scraper_type: ScraperType;
+          scraper_config: Record<string, unknown>;
+          polling_interval_hours: number | null;
+          last_polled_at: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          store_id?: string;
+          name: string;
+          url?: string | null;
+          currency_id?: string | null;
+          logo_url?: string | null;
+          scraper_type?: ScraperType;
+          scraper_config?: Record<string, unknown>;
+          polling_interval_hours?: number | null;
+          is_active?: boolean;
+        };
+        Update: {
+          name?: string;
+          url?: string | null;
+          currency_id?: string | null;
+          logo_url?: string | null;
+          scraper_type?: ScraperType;
+          scraper_config?: Record<string, unknown>;
+          polling_interval_hours?: number | null;
+          last_polled_at?: string | null;
+          is_active?: boolean;
+        };
+        Relationships: [];
+      };
+
+      store_printing_links: {
+        Row: {
+          store_printing_link_id: string;
+          store_id: string;
+          card_printing_id: string;
+          product_url: string;
+          product_name: string | null;
+          last_price: number | null;
+          last_currency_id: string | null;
+          last_scraped_at: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          store_printing_link_id?: string;
+          store_id: string;
+          card_printing_id: string;
+          product_url: string;
+          product_name?: string | null;
+          last_price?: number | null;
+          last_currency_id?: string | null;
+          is_active?: boolean;
+        };
+        Update: {
+          product_url?: string;
+          product_name?: string | null;
+          last_price?: number | null;
+          last_currency_id?: string | null;
+          last_scraped_at?: string | null;
+          is_active?: boolean;
+        };
+        Relationships: [];
+      };
+
+      scrape_jobs: {
+        Row: {
+          scrape_job_id: string;
+          price_source_id: string;
+          store_id: string | null;
+          status: ScrapeJobStatus;
+          triggered_by: ScrapeTriggeredBy;
+          started_at: string | null;
+          completed_at: string | null;
+          items_count: number;
+          items_success: number;
+          items_failed: number;
+          error_message: string | null;
+        };
+        Insert: {
+          scrape_job_id?: string;
+          price_source_id: string;
+          store_id?: string | null;
+          status?: ScrapeJobStatus;
+          triggered_by?: ScrapeTriggeredBy;
+          started_at?: string | null;
+          items_count?: number;
+          items_success?: number;
+          items_failed?: number;
+          error_message?: string | null;
+        };
+        Update: {
+          status?: ScrapeJobStatus;
+          started_at?: string | null;
+          completed_at?: string | null;
+          items_count?: number;
+          items_success?: number;
+          items_failed?: number;
+          error_message?: string | null;
+        };
+        Relationships: [];
+      };
+
+      scrape_job_items: {
+        Row: {
+          scrape_job_item_id: string;
+          scrape_job_id: string;
+          card_printing_id: string;
+          raw_price: number;
+          currency_id: string;
+          raw_data: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: {
+          scrape_job_item_id?: string;
+          scrape_job_id: string;
+          card_printing_id: string;
+          raw_price: number;
+          currency_id: string;
+          raw_data?: Record<string, unknown> | null;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+
+      // ================================================================
+      // Ban List History
+      // ================================================================
+
+      ban_list_revisions: {
+        Row: {
+          revision_id: string;
+          format_id: string;
+          name: string;
+          description: string | null;
+          effective_date: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          revision_id?: string;
+          format_id: string;
+          name: string;
+          description?: string | null;
+          effective_date: string;
+          created_by?: string | null;
+        };
+        Update: {
+          name?: string;
+          description?: string | null;
+          effective_date?: string;
+        };
+        Relationships: [];
+      };
+
+      // ================================================================
+      // Card Oracles & Deck Strategy
+      // ================================================================
+
+      card_oracles: {
+        Row: {
+          oracle_id: string;
+          card_id: string;
+          source_document: string;
+          ruling_text: string;
+          ability_type: AbilityType | null;
+          sort_order: number;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          oracle_id?: string;
+          card_id: string;
+          source_document: string;
+          ruling_text: string;
+          ability_type?: AbilityType | null;
+          sort_order?: number;
+          created_by?: string | null;
+        };
+        Update: {
+          source_document?: string;
+          ruling_text?: string;
+          ability_type?: AbilityType | null;
+          sort_order?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      deck_strategy_sections: {
+        Row: {
+          section_id: string;
+          deck_id: string;
+          section_type: StrategySectionType;
+          title: string;
+          content: string;
+          sort_order: number;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          section_id?: string;
+          deck_id: string;
+          section_type: StrategySectionType;
+          title: string;
+          content: string;
+          sort_order?: number;
+          created_by?: string | null;
+        };
+        Update: {
+          section_type?: StrategySectionType;
+          title?: string;
+          content?: string;
+          sort_order?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      deck_strategy_card_refs: {
+        Row: {
+          ref_id: string;
+          section_id: string;
+          card_id: string;
+          role_label: string | null;
+        };
+        Insert: {
+          ref_id?: string;
+          section_id: string;
+          card_id: string;
+          role_label?: string | null;
+        };
+        Update: {
+          role_label?: string | null;
+        };
+        Relationships: [];
+      };
+
+      ban_list_entries: {
+        Row: {
+          entry_id: string;
+          revision_id: string;
+          card_id: string;
+          max_qty: number;
+          previous_qty: number | null;
+          change_type: BanListChangeType;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          entry_id?: string;
+          revision_id: string;
+          card_id: string;
+          max_qty: number;
+          previous_qty?: number | null;
+          change_type: BanListChangeType;
+          notes?: string | null;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;
@@ -750,6 +1067,12 @@ export interface Database {
       validation_severity: ValidationSeverity;
       visibility_level: VisibilityLevel;
       submission_status: SubmissionStatus;
+      scraper_type: ScraperType;
+      scrape_job_status: ScrapeJobStatus;
+      scrape_triggered_by: ScrapeTriggeredBy;
+      ban_list_change_type: BanListChangeType;
+      ability_type: AbilityType;
+      strategy_section_type: StrategySectionType;
     };
 
     CompositeTypes: Record<string, never>;
