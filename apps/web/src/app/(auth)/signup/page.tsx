@@ -7,10 +7,10 @@ export const metadata = {
 
 export default function SignupPage() {
   return (
-    <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
+    <div className="w-full rounded-2xl border border-border/40 bg-card/80 p-8 shadow-xl backdrop-blur-sm">
       <div className="mb-8 space-y-2">
-        <h2 className="text-3xl font-bold text-slate-900">Crear cuenta</h2>
-        <p className="text-slate-600">
+        <h2 className="text-3xl font-bold text-foreground">Crear cuenta</h2>
+        <p className="text-muted-foreground">
           Completa el formulario para unirte a la comunidad
         </p>
       </div>

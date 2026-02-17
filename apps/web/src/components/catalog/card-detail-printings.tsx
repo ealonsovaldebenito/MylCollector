@@ -1,5 +1,15 @@
 'use client';
 
+/**
+ * File: apps/web/src/components/catalog/card-detail-printings.tsx
+ * Context: Catalog → detalle de carta → listado de reimpresiones.
+ * Description: Renderiza printings con selección opcional (sync con precios/estadísticas).
+ * Relations:
+ * - Used by: `apps/web/src/components/catalog/catalog-card-detail.tsx`, `apps/web/src/components/catalog/card-detail-page.tsx`
+ * Changelog:
+ * - 2026-02-17: Agrega `variant="sidebar"` para layout 1-col en sidebar.
+ */
+
 import type { CardDetail } from '@myl/shared';
 import { editionDisplayName } from '@myl/shared';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +21,7 @@ interface CardDetailPrintingsProps {
   printings: CardDetail['printings'];
   selectedPrintingId?: string | null;
   onSelectPrinting?: (printingId: string) => void;
+  variant?: 'default' | 'sidebar';
 }
 
 const STATUS_ICONS: Record<string, typeof Shield> = {
@@ -27,7 +38,12 @@ const STATUS_COLORS: Record<string, string> = {
   DISCONTINUED: 'text-muted-foreground',
 };
 
-export function CardDetailPrintings({ printings, selectedPrintingId, onSelectPrinting }: CardDetailPrintingsProps) {
+export function CardDetailPrintings({
+  printings,
+  selectedPrintingId,
+  onSelectPrinting,
+  variant = 'default',
+}: CardDetailPrintingsProps) {
   if (printings.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
@@ -36,8 +52,10 @@ export function CardDetailPrintings({ printings, selectedPrintingId, onSelectPri
     );
   }
 
+  const gridCols = variant === 'sidebar' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
+
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className={cn('grid gap-3', gridCols)}>
       {printings.map((p) => {
         const Icon = STATUS_ICONS[p.legal_status] ?? Shield;
         const iconColor = STATUS_COLORS[p.legal_status] ?? '';

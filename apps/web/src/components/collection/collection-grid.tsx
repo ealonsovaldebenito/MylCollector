@@ -2,7 +2,6 @@
 
 import { CollectionCardTile } from './collection-card-tile';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Package } from 'lucide-react';
 import { CollectionEmptyState } from './collection-empty-state';
 import { cn } from '@/lib/utils';
 import type { UserCardWithRelations } from '@myl/shared';
@@ -13,6 +12,7 @@ interface CollectionGridProps {
   onEdit?: (item: UserCardWithRelations) => void;
   onIncrement?: (item: UserCardWithRelations) => void;
   onDecrement?: (item: UserCardWithRelations) => void;
+  onMove?: (item: UserCardWithRelations) => void;
   gridSize?: 'normal' | 'large';
   className?: string;
 }
@@ -23,15 +23,14 @@ export function CollectionGrid({
   onEdit,
   onIncrement,
   onDecrement,
+  onMove,
   gridSize = 'large',
   className,
 }: CollectionGridProps) {
-  // Configuración de grid según tamaño
   const gridClasses = gridSize === 'large'
     ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
     : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8';
 
-  // Loading
   if (isLoading && items.length === 0) {
     return (
       <div className={cn('grid gap-4', gridClasses)}>
@@ -46,7 +45,6 @@ export function CollectionGrid({
     );
   }
 
-  // Empty state
   if (!isLoading && items.length === 0) {
     return <CollectionEmptyState />;
   }
@@ -60,6 +58,7 @@ export function CollectionGrid({
           onEdit={onEdit ? () => onEdit(item) : undefined}
           onIncrement={onIncrement ? () => onIncrement(item) : undefined}
           onDecrement={onDecrement ? () => onDecrement(item) : undefined}
+          onMove={onMove ? () => onMove(item) : undefined}
           size={gridSize}
           style={{ animationDelay: `${Math.min(index * 0.02, 0.3)}s` }}
         />

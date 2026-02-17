@@ -29,7 +29,16 @@ export const GET = withApiHandler(async (request, { requestId: _requestId }) => 
     limit: url.searchParams.get('limit') ? Number(url.searchParams.get('limit')) : 50,
   });
 
-  const items = await getUserCollection(supabase, user.id, filters);
+  // Extra filters not in the zod schema
+  const legalStatus = url.searchParams.get('legal_status') || undefined;
+  const collectionIdParam = url.searchParams.get('collection_id');
+  const collectionId = collectionIdParam === '__none__' ? null : collectionIdParam || undefined;
+
+  const items = await getUserCollection(supabase, user.id, {
+    ...filters,
+    ...(legalStatus ? { legal_status: legalStatus } : {}),
+    ...(collectionId !== undefined ? { collection_id: collectionId } : {}),
+  });
 
   return createSuccess({ items });
 });

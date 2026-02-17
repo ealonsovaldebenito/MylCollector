@@ -1,3 +1,13 @@
+/**
+ * File: apps/web/src/app/api/v1/decks/[deckId]/import/resolve/route.ts
+ * Context: Importador de mazos → resolución manual de líneas ambiguas.
+ * Description: Combina resoluciones con cartas resueltas y crea una nueva versión del mazo.
+ * Relations:
+ * - Versionado: `createDeckVersion` (`apps/web/src/lib/services/decks.service.ts`)
+ * Changelog:
+ * - 2026-02-17: Incluye `is_key_card` en payload (default false) para compatibilidad con persistencia en DB.
+ */
+
 import { withApiHandler } from '@/lib/api/with-api-handler';
 import { createSuccess } from '@/lib/api/response';
 import { createClient } from '@/lib/supabase/server';
@@ -63,6 +73,7 @@ export const POST = withApiHandler(async (request, { params, requestId }) => {
     card_printing_id: c.card_printing_id,
     qty: c.qty,
     is_starting_gold: c.is_starting_gold,
+    is_key_card: false,
   }));
 
   const version = await createDeckVersion(

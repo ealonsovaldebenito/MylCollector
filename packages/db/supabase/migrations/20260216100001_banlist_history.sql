@@ -4,6 +4,7 @@
 -- Doc reference: 04_DECK_VALIDATION_ENGINE.md
 -- Changelog:
 --   2026-02-16 — Initial creation
+--   2026-02-17 — Make RLS policies idempotent (DROP POLICY IF EXISTS) for reruns.
 
 -- ============================================================================
 -- BAN LIST REVISIONS: versioned snapshots of ban list changes per format
@@ -59,8 +60,10 @@ ALTER TABLE format_card_limits
 ALTER TABLE ban_list_revisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ban_list_entries ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS ban_list_revisions_select ON ban_list_revisions;
 CREATE POLICY ban_list_revisions_select ON ban_list_revisions
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS ban_list_entries_select ON ban_list_entries;
 CREATE POLICY ban_list_entries_select ON ban_list_entries
   FOR SELECT USING (true);

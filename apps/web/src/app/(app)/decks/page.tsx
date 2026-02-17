@@ -8,10 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default function DecksPage() {
-  return (
-    <div className="-m-6 h-[calc(100vh-3.5rem)]">
-      <MyDecksDashboard />
-    </div>
-  );
+  return <MyDecksDashboard />;
 }
 

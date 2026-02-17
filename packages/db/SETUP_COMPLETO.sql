@@ -1,3 +1,13 @@
+-- File: packages/db/SETUP_COMPLETO.sql
+-- Context: Instalación/actualización completa del schema para Supabase SQL Editor.
+-- Description: Script multi-statement para dejar la BD lista (tablas, índices, triggers, RLS y storage). Sin seeds.
+-- Relationships:
+--   - Base de: `DOCS/SQL/QUERYS.sql` (script unificado para ejecutar en Supabase).
+--   - Complementa: `packages/db/supabase/migrations/*.sql` (migraciones incrementales del repo).
+-- Changelog:
+--   - 2026-02-17: Se elimina PARTE 2 (seeds) del setup por requerimiento: este archivo NO inserta catálogo.
+--   - 2026-02-17: Script re-ejecutable (idempotente) sin inserción de catálogo.
+
 -- ============================================
 -- SETUP COMPLETO - MYL Platform
 -- ============================================
@@ -13,7 +23,7 @@
 --
 -- CONTENIDO:
 -- - Parte 1: Migraciones (schema completo, constraints, triggers, RLS)
--- - Parte 2: Datos seed (bloques, ediciones, razas, cartas ejemplo)
+-- - Parte 2: (sin seeds) - intencionalmente vacío
 -- - Parte 3: Storage bucket para imágenes
 -- ============================================
 
@@ -221,6 +231,23 @@ CREATE INDEX idx_card_printings_edition_rarity ON card_printings(edition_id, rar
 DROP INDEX IF EXISTS idx_card_printings_card_edition;
 CREATE INDEX idx_card_printings_card_edition ON card_printings(card_id, edition_id);
 
+-- FK behaviors (idempotent):
+-- - Si borras una edición, se borran automáticamente sus printings (edition es requerida).
+-- - Si borras una rareza, los printings quedan con rareza NULL (rareza es opcional).
+ALTER TABLE card_printings
+  DROP CONSTRAINT IF EXISTS card_printings_edition_id_fkey;
+ALTER TABLE card_printings
+  ADD CONSTRAINT card_printings_edition_id_fkey
+  FOREIGN KEY (edition_id) REFERENCES editions(edition_id)
+  ON DELETE CASCADE;
+
+ALTER TABLE card_printings
+  DROP CONSTRAINT IF EXISTS card_printings_rarity_tier_id_fkey;
+ALTER TABLE card_printings
+  ADD CONSTRAINT card_printings_rarity_tier_id_fkey
+  FOREIGN KEY (rarity_tier_id) REFERENCES rarity_tiers(rarity_tier_id)
+  ON DELETE SET NULL;
+
 -- TRIGGER: validate ally_strength
 CREATE OR REPLACE FUNCTION trg_validate_ally_strength()
 RETURNS trigger AS $$
@@ -243,6 +270,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_cards_ally_strength ON cards;
 CREATE TRIGGER trg_cards_ally_strength
   BEFORE INSERT OR UPDATE ON cards
   FOR EACH ROW
@@ -288,7 +316,9 @@ CREATE TABLE IF NOT EXISTS roles (
 INSERT INTO roles (name, description) VALUES
   ('user', 'Default registered user'),
   ('moderator', 'Can moderate content and prices'),
-  ('admin', 'Full administrative access');
+  ('admin', 'Full administrative access')
+ON CONFLICT (name) DO UPDATE SET
+  description = EXCLUDED.description;
 
 -- USER ROLES
 CREATE TABLE IF NOT EXISTS user_roles (
@@ -450,6 +480,7 @@ CREATE TABLE IF NOT EXISTS deck_version_cards (
   card_printing_id      uuid NOT NULL REFERENCES card_printings(card_printing_id),
   qty                   int NOT NULL CHECK (qty > 0),
   is_starting_gold      boolean NOT NULL DEFAULT false,
+  is_key_card           boolean NOT NULL DEFAULT false,
   created_at            timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT uq_deck_version_card UNIQUE (deck_version_id, card_printing_id)
 );
@@ -539,7 +570,8 @@ CREATE TABLE IF NOT EXISTS public_deck_cards (
   public_deck_id       uuid NOT NULL REFERENCES public_decks(public_deck_id) ON DELETE CASCADE,
   card_printing_id     uuid NOT NULL REFERENCES card_printings(card_printing_id),
   qty                  int NOT NULL CHECK (qty > 0),
-  is_starting_gold     boolean NOT NULL DEFAULT false
+  is_starting_gold     boolean NOT NULL DEFAULT false,
+  is_key_card          boolean NOT NULL DEFAULT false
 );
 
 DROP INDEX IF EXISTS idx_public_deck_cards_deck;
@@ -815,6 +847,54 @@ DROP POLICY IF EXISTS deck_shares_update_own ON deck_shares;
 CREATE POLICY deck_shares_update_own ON deck_shares
   FOR UPDATE USING (auth.uid() = created_by);
 
+-- ============================================================================
+-- DECK KEY CARDS (star): persist key cards per deck (not per version)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS deck_key_cards (
+  deck_key_card_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deck_id          uuid NOT NULL REFERENCES decks(deck_id) ON DELETE CASCADE,
+  card_id          uuid NOT NULL REFERENCES cards(card_id) ON DELETE CASCADE,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_deck_key_cards UNIQUE (deck_id, card_id)
+);
+
+DROP INDEX IF EXISTS idx_deck_key_cards_deck;
+DROP INDEX IF EXISTS idx_deck_key_cards_card;
+CREATE INDEX idx_deck_key_cards_deck ON deck_key_cards(deck_id);
+CREATE INDEX idx_deck_key_cards_card ON deck_key_cards(card_id);
+
+ALTER TABLE deck_key_cards ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS deck_key_cards_select ON deck_key_cards;
+CREATE POLICY deck_key_cards_select ON deck_key_cards
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM decks d
+      WHERE d.deck_id = deck_key_cards.deck_id
+      AND (d.user_id = auth.uid() OR d.visibility = 'PUBLIC')
+    )
+  );
+
+DROP POLICY IF EXISTS deck_key_cards_insert_own ON deck_key_cards;
+CREATE POLICY deck_key_cards_insert_own ON deck_key_cards
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM decks d
+      WHERE d.deck_id = deck_key_cards.deck_id
+      AND d.user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS deck_key_cards_delete_own ON deck_key_cards;
+CREATE POLICY deck_key_cards_delete_own ON deck_key_cards
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM decks d
+      WHERE d.deck_id = deck_key_cards.deck_id
+      AND d.user_id = auth.uid()
+    )
+  );
+
 -- COMMUNITY PRICE SUBMISSIONS
 DROP POLICY IF EXISTS submissions_select_all ON community_price_submissions;
 CREATE POLICY submissions_select_all ON community_price_submissions
@@ -854,326 +934,51 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_updated_at_blocks ON blocks;
 CREATE TRIGGER trg_updated_at_blocks BEFORE UPDATE ON blocks
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_editions ON editions;
 CREATE TRIGGER trg_updated_at_editions BEFORE UPDATE ON editions
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_stores ON stores;
 CREATE TRIGGER trg_updated_at_stores BEFORE UPDATE ON stores
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_cards ON cards;
 CREATE TRIGGER trg_updated_at_cards BEFORE UPDATE ON cards
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_card_printings ON card_printings;
 CREATE TRIGGER trg_updated_at_card_printings BEFORE UPDATE ON card_printings
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_users ON users;
 CREATE TRIGGER trg_updated_at_users BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_user_cards ON user_cards;
 CREATE TRIGGER trg_updated_at_user_cards BEFORE UPDATE ON user_cards
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_formats ON formats;
 CREATE TRIGGER trg_updated_at_formats BEFORE UPDATE ON formats
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_decks ON decks;
 CREATE TRIGGER trg_updated_at_decks BEFORE UPDATE ON decks
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_updated_at_public_decks ON public_decks;
 CREATE TRIGGER trg_updated_at_public_decks BEFORE UPDATE ON public_decks
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
 -- ============================================
--- PARTE 2: DATOS SEED (OFICIAL MYL)
+-- PARTE 2: (SIN SEEDS)
 -- ============================================
+-- Intencionalmente NO se insertan datos de catálogo (bloques/ediciones/razas/rarezas/tags/formatos)
+-- desde este script.
 
--- 1. BLOQUES (según información oficial)
-INSERT INTO blocks (name, code, sort_order) VALUES
-  ('Mundo Gótico', 'MG', 1),
-  ('La Ira del Nahual', 'NAHUAL', 2),
-  ('Ragnarok', 'RAGNAROK', 3),
-  ('Espíritu de Dragón', 'DRAGON', 4),
-  ('Espada Sagrada', 'ESPADA', 5),
-  ('Helénica', 'HELENICA', 6),
-  ('Dominios de Ra', 'RA', 7),
-  ('Hijos de Daana', 'DAANA', 8)
-ON CONFLICT (code) DO NOTHING;
-
--- 2. EDICIONES (una edición por bloque con año)
-INSERT INTO editions (block_id, name, code, release_date, sort_order)
-SELECT
-  b.block_id,
-  e.name,
-  e.code,
-  e.release_date,
-  e.sort_order
-FROM (VALUES
-  ('MG', 'Mundo Gótico (2000)', 'MG-2000', '2000-01-01'::date, 1),
-  ('NAHUAL', 'La Ira del Nahual (2001)', 'NAHUAL-2001', '2001-01-01'::date, 2),
-  ('RAGNAROK', 'Ragnarok (2001)', 'RAGNAROK-2001', '2001-06-01'::date, 3),
-  ('DRAGON', 'Espíritu de Dragón (2002)', 'DRAGON-2002', '2002-01-01'::date, 4),
-  ('ESPADA', 'Espada Sagrada (2003)', 'ESPADA-2003', '2003-01-01'::date, 5),
-  ('HELENICA', 'Helénica (2003)', 'HELENICA-2003', '2003-06-01'::date, 6),
-  ('RA', 'Dominios de Ra (2004)', 'RA-2004', '2004-01-01'::date, 7),
-  ('DAANA', 'Hijos de Daana (2004)', 'DAANA-2004', '2004-06-01'::date, 8)
-) AS e(block_code, name, code, release_date, sort_order)
-JOIN blocks b ON b.code = e.block_code
-ON CONFLICT (code) DO NOTHING;
-
--- 3. TIPOS DE CARTA
-INSERT INTO card_types (name, code, sort_order) VALUES
-  ('Oro', 'ORO', 1),
-  ('Aliado', 'ALIADO', 2),
-  ('Tótem', 'TOTEM', 3),
-  ('Talismán', 'TALISMAN', 4),
-  ('Arma', 'ARMA', 5)
-ON CONFLICT (code) DO NOTHING;
-
--- 4. RAZAS (según información oficial del usuario)
-INSERT INTO races (name, code, sort_order) VALUES
-  -- Mundo Gótico
-  ('Vampiro', 'VAMPIRO', 1),
-  ('Licántropo', 'LICANTROPO', 2),
-  ('Cazador', 'CAZADOR', 3),
-  -- La Ira del Nahual
-  ('Bestia', 'BESTIA', 4),
-  ('Chamán', 'CHAMAN', 5),
-  ('Guerrero', 'GUERRERO', 6),
-  -- Ragnarok
-  ('Dios', 'DIOS', 7),
-  ('Bárbaro', 'BARBARO', 8),
-  ('Abominación', 'ABOMINACION', 9),
-  -- Espíritu de Dragón
-  ('Campeón', 'CAMPEON', 10),
-  ('Kami', 'KAMI', 11),
-  ('Xian', 'XIAN', 12),
-  ('Criaturas', 'CRIATURAS', 13),
-  ('Ninja', 'NINJA', 14),
-  ('Samurái', 'SAMURAI', 15),
-  ('Shaolín', 'SHAOLIN', 16),
-  -- Espada Sagrada
-  ('Caballero', 'CABALLERO', 17),
-  ('Dragón', 'DRAGON', 18),
-  ('Faerie', 'FAERIE', 19),
-  -- Helénica
-  ('Héroe', 'HEROE', 20),
-  ('Titán', 'TITAN', 21),
-  ('Olímpico', 'OLIMPICO', 22),
-  -- Dominios de Ra
-  ('Eterno', 'ETERNO', 23),
-  ('Sacerdote', 'SACERDOTE', 24),
-  ('Faraón', 'FARAON', 25),
-  -- Hijos de Daana
-  ('Sombra', 'SOMBRA', 26),
-  ('Defensor', 'DEFENSOR', 27),
-  ('Desafiante', 'DESAFIANTE', 28)
-ON CONFLICT (code) DO NOTHING;
-
--- 5. RAREZAS
-INSERT INTO rarity_tiers (name, code, sort_order) VALUES
-  ('Común', 'COMUN', 1),
-  ('Poco Común', 'POCO_COMUN', 2),
-  ('Rara', 'RARA', 3),
-  ('Ultra Rara', 'ULTRA_RARA', 4),
-  ('Secreta', 'SECRETA', 5)
-ON CONFLICT (code) DO NOTHING;
-
--- 6. TAGS
-INSERT INTO tags (name, slug) VALUES
-  ('Agresivo', 'agresivo'),
-  ('Control', 'control'),
-  ('Combo', 'combo'),
-  ('Defensa', 'defensa'),
-  ('Ramp', 'ramp'),
-  ('Draw', 'draw'),
-  ('Removal', 'removal'),
-  ('Token', 'token'),
-  ('Sacrificio', 'sacrificio'),
-  ('Recursión', 'recursion'),
-  ('Protección', 'proteccion'),
-  ('Evasión', 'evasion'),
-  ('Equipamiento', 'equipamiento'),
-  ('Tribal', 'tribal'),
-  ('Voltron', 'voltron'),
-  ('Mill', 'mill'),
-  ('Burn', 'burn'),
-  ('Lifegain', 'lifegain')
-ON CONFLICT (slug) DO NOTHING;
-
--- 7. MONEDAS (incluye CLP)
-INSERT INTO currencies (code, name, symbol) VALUES
-  ('CLP', 'Peso Chileno', '$'),
-  ('EUR', 'Euro', '€'),
-  ('USD', 'US Dollar', 'US$'),
-  ('GBP', 'British Pound', '£')
-ON CONFLICT (code) DO NOTHING;
-
--- 8. FORMATOS (deck size: 50 cartas, oro inicial: 0/1)
-INSERT INTO formats (name, code, description, is_active, params_json) VALUES
-  (
-    'Libre',
-    'LIBRE',
-    'Todo con todo - sin restricciones de bloque o raza',
-    true,
-    '{
-      "min_deck_size": 50,
-      "max_deck_size": 50,
-      "max_copies_per_card": 3,
-      "allow_unique_duplicates": false,
-      "starting_gold_limit": 1,
-      "block_restriction": null,
-      "race_restriction": null
-    }'::jsonb
-  ),
-  (
-    'Edición Racial',
-    'EDICION_RACIAL',
-    'Bloque + Raza específica (aliados deben ser de esa raza)',
-    true,
-    '{
-      "min_deck_size": 50,
-      "max_deck_size": 50,
-      "max_copies_per_card": 3,
-      "allow_unique_duplicates": false,
-      "starting_gold_limit": 1,
-      "block_restriction": "required",
-      "race_restriction": "required"
-    }'::jsonb
-  ),
-  (
-    'Edición Libre',
-    'EDICION_LIBRE',
-    'Bloque específico, cualquier raza',
-    true,
-    '{
-      "min_deck_size": 50,
-      "max_deck_size": 50,
-      "max_copies_per_card": 3,
-      "allow_unique_duplicates": false,
-      "starting_gold_limit": 1,
-      "block_restriction": "required",
-      "race_restriction": null
-    }'::jsonb
-  )
-ON CONFLICT (code) DO NOTHING;
-
--- 9. CARTAS DE EJEMPLO (opcional)
-DO $$
-DECLARE
-  v_card_type_oro uuid;
-  v_card_type_aliado uuid;
-  v_card_type_arma uuid;
-  v_race_vampiro uuid;
-  v_edition_mg uuid;
-  v_rarity_comun uuid;
-  v_rarity_rara uuid;
-  v_tag_agresivo uuid;
-  v_tag_control uuid;
-  v_card_oro uuid;
-  v_card_vampiro uuid;
-  v_card_arma uuid;
-BEGIN
-  -- Obtener IDs de catálogo
-  SELECT card_type_id INTO v_card_type_oro FROM card_types WHERE code = 'ORO';
-  SELECT card_type_id INTO v_card_type_aliado FROM card_types WHERE code = 'ALIADO';
-  SELECT card_type_id INTO v_card_type_arma FROM card_types WHERE code = 'ARMA';
-  SELECT race_id INTO v_race_vampiro FROM races WHERE code = 'VAMPIRO';
-  SELECT edition_id INTO v_edition_mg FROM editions WHERE code = 'MG-2000';
-  SELECT rarity_tier_id INTO v_rarity_comun FROM rarity_tiers WHERE code = 'COMUN';
-  SELECT rarity_tier_id INTO v_rarity_rara FROM rarity_tiers WHERE code = 'RARA';
-  SELECT tag_id INTO v_tag_agresivo FROM tags WHERE slug = 'agresivo';
-  SELECT tag_id INTO v_tag_control FROM tags WHERE slug = 'control';
-
-  -- Carta 1: Oro Inicial
-  INSERT INTO cards (
-    name, name_normalized, card_type_id, race_id, cost,
-    is_unique, has_ability, can_be_starting_gold, text
-  ) VALUES (
-    'Moneda de Sangre',
-    'moneda de sangre',
-    v_card_type_oro,
-    NULL,
-    0,
-    false,
-    false,
-    true,
-    'Genera 1 de oro.'
-  )
-  RETURNING card_id INTO v_card_oro;
-
-  INSERT INTO card_printings (
-    card_id, edition_id, rarity_tier_id, legal_status,
-    printing_variant, collector_number, illustrator
-  ) VALUES (
-    v_card_oro, v_edition_mg, v_rarity_comun, 'LEGAL',
-    'Standard', '001', 'Artista Ejemplo'
-  );
-
-  -- Carta 2: Aliado Vampiro
-  INSERT INTO cards (
-    name, name_normalized, card_type_id, race_id, cost,
-    ally_strength, is_unique, has_ability, can_be_starting_gold,
-    text, flavor_text
-  ) VALUES (
-    'Señor de la Noche',
-    'señor de la noche',
-    v_card_type_aliado,
-    v_race_vampiro,
-    4,
-    5,
-    true,
-    true,
-    false,
-    'Al entrar: Roba 1 carta y pierde 1 vida.\nAl atacar: Si el defensor no tiene aliados, inflige 2 de daño adicional.',
-    '"La oscuridad es mi dominio."'
-  )
-  RETURNING card_id INTO v_card_vampiro;
-
-  INSERT INTO card_printings (
-    card_id, edition_id, rarity_tier_id, legal_status,
-    printing_variant, collector_number, illustrator
-  ) VALUES (
-    v_card_vampiro, v_edition_mg, v_rarity_rara, 'LEGAL',
-    'Standard', '042', 'Ilustrador Vampiro'
-  );
-
-  INSERT INTO card_tags (card_id, tag_id) VALUES
-    (v_card_vampiro, v_tag_agresivo),
-    (v_card_vampiro, v_tag_control);
-
-  -- Carta 3: Arma
-  INSERT INTO cards (
-    name, name_normalized, card_type_id, race_id, cost,
-    is_unique, has_ability, can_be_starting_gold, text
-  ) VALUES (
-    'Colmillos Ensangrentados',
-    'colmillos ensangrentados',
-    v_card_type_arma,
-    NULL,
-    2,
-    false,
-    true,
-    false,
-    'Equipa a un aliado Vampiro: +2 de fuerza.\nAl atacar: El defensor pierde 1 vida.'
-  )
-  RETURNING card_id INTO v_card_arma;
-
-  INSERT INTO card_printings (
-    card_id, edition_id, rarity_tier_id, legal_status,
-    printing_variant, collector_number, illustrator
-  ) VALUES (
-    v_card_arma, v_edition_mg, v_rarity_comun, 'LEGAL',
-    'Standard', '085', 'Ilustrador Arma'
-  );
-
-  INSERT INTO card_tags (card_id, tag_id) VALUES
-    (v_card_arma, v_tag_agresivo);
-
-  RAISE NOTICE 'Seed data insertado: 3 cartas de ejemplo de Mundo Gótico';
-END $$;
-
--- ============================================
 -- PARTE 3: STORAGE BUCKET PARA IMÁGENES
 -- ============================================
 

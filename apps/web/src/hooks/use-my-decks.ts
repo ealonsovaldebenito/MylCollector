@@ -6,12 +6,18 @@ interface DeckItem {
   deck_id: string;
   user_id: string;
   format_id: string;
+  edition_id: string | null;
+  race_id: string | null;
   name: string;
   description: string | null;
+  strategy: string | null;
   visibility: string;
   created_at: string;
   updated_at: string;
   format: { format_id: string; name: string; code: string };
+  edition?: { name: string; code: string } | null;
+  race?: { name: string } | null;
+  card_count?: number;
 }
 
 interface UseMyDecksResult {

@@ -9,11 +9,12 @@ import { cn } from '@/lib/utils';
 
 interface CardDetailHeroProps {
   card: CardDetail;
+  printing?: CardDetail['printings'][number] | null;
 }
 
-export function CardDetailHero({ card }: CardDetailHeroProps) {
-  const heroImage = card.printings[0]?.image_url ?? null;
-  const firstPrinting = card.printings[0];
+export function CardDetailHero({ card, printing }: CardDetailHeroProps) {
+  const activePrinting = printing ?? card.printings[0] ?? null;
+  const heroImage = activePrinting?.image_url ?? null;
   const abilitySections = card.text ? parseAbilityText(card.text) : [];
 
   return (
@@ -51,9 +52,9 @@ export function CardDetailHero({ card }: CardDetailHeroProps) {
               {card.race.name}
             </Badge>
           )}
-          {firstPrinting && (
+          {activePrinting && (
             <Badge variant="outline" className="px-3 py-1 text-sm">
-              {editionDisplayName(firstPrinting.edition.name)}
+              {editionDisplayName(activePrinting.edition.name)}
             </Badge>
           )}
         </div>
@@ -144,22 +145,22 @@ export function CardDetailHero({ card }: CardDetailHeroProps) {
 
         {/* Metadata */}
         <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground pt-2 border-t border-border">
-          {firstPrinting?.illustrator && (
+          {activePrinting?.illustrator && (
             <div className="flex items-center gap-1.5">
               <Paintbrush className="h-3.5 w-3.5" />
-              <span>Ilustrador: <span className="text-foreground">{firstPrinting.illustrator}</span></span>
+              <span>Ilustrador: <span className="text-foreground">{activePrinting.illustrator}</span></span>
             </div>
           )}
-          {firstPrinting?.edition && (
+          {activePrinting?.edition && (
             <div className="flex items-center gap-1.5">
               <Layers className="h-3.5 w-3.5" />
-              <span>Formato: <span className="text-foreground">{editionDisplayName(firstPrinting.edition.name)}</span></span>
+              <span>Edición: <span className="text-foreground">{editionDisplayName(activePrinting.edition.name)}</span></span>
             </div>
           )}
-          {firstPrinting?.collector_number && (
+          {activePrinting?.collector_number && (
             <div className="flex items-center gap-1.5">
               <Hash className="h-3.5 w-3.5" />
-              <span>Codigo: <span className="text-foreground font-mono">{firstPrinting.collector_number}</span></span>
+              <span>Código: <span className="text-foreground font-mono">{activePrinting.collector_number}</span></span>
             </div>
           )}
         </div>

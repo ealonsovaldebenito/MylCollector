@@ -24,7 +24,7 @@ export const GET = withApiHandler(async (_request, { params }) => {
   if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar razas disponibles');
 
   const set = new Set<string>();
-  for (const row of (data ?? []) as Array<{ card: { race_id: string | null } | null }>) {
+  for (const row of (data ?? []) as unknown as Array<{ card: { race_id: string | null } | null }>) {
     const rid = row.card?.race_id ?? null;
     if (rid) set.add(rid);
   }

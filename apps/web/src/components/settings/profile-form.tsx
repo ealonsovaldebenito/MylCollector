@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useUser } from '@/hooks/use-user';
+import { useUser } from '@/contexts/user-context';
 import { useAuth } from '@/hooks/use-auth';
 import { updateProfileSchema } from '@myl/shared';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { AvatarUpload } from './avatar-upload';
 import { useToast } from '@/hooks/use-toast';
 
 export function ProfileForm() {
-  const { user } = useUser();
+  const { user, profile, refreshProfile } = useUser();
   const { updateProfile, isLoading } = useAuth();
   const { toast } = useToast();
   const [formData, setFormData] = useState({
@@ -25,12 +25,12 @@ export function ProfileForm() {
   useEffect(() => {
     if (user) {
       setFormData({
-        display_name: user.user_metadata?.display_name || '',
-        bio: user.user_metadata?.bio || '',
-        avatar_url: user.user_metadata?.avatar_url || null,
+        display_name: profile?.display_name || user.user_metadata?.display_name || '',
+        bio: profile?.bio || user.user_metadata?.bio || '',
+        avatar_url: profile?.avatar_url || user.user_metadata?.avatar_url || null,
       });
     }
-  }, [user]);
+  }, [user, profile]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +51,7 @@ export function ProfileForm() {
 
     const success = await updateProfile(formData);
     if (success) {
+      await refreshProfile();
       toast({
         title: 'Perfil actualizado',
         description: 'Tus cambios han sido guardados correctamente.',
@@ -68,7 +69,7 @@ export function ProfileForm() {
           <div className="mt-2">
             <AvatarUpload
               currentUrl={formData.avatar_url}
-              displayName={formData.display_name || user.email || 'Usuario'}
+              displayName={formData.display_name || profile?.display_name || user.email || 'Usuario'}
               onUploadComplete={(url) => setFormData({ ...formData, avatar_url: url })}
             />
           </div>

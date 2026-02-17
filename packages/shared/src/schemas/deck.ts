@@ -36,6 +36,7 @@ export const deckVersionCardSchema = z.object({
   card_printing_id: z.string().uuid(),
   qty: z.number().int().positive(),
   is_starting_gold: z.boolean(),
+  is_key_card: z.boolean(),
 });
 
 // Inferred types

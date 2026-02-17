@@ -25,7 +25,7 @@ const fetcher = async (url: string) => {
 /**
  * Build query string from filters
  */
-function buildQueryString(filters: Partial<CollectionFilters>): string {
+function buildQueryString(filters: Partial<CollectionFilters> & { legal_status?: string; collection_id?: string | null }): string {
   const params = new URLSearchParams();
   if (filters.q) params.set('q', filters.q);
   if (filters.block_id) params.set('block_id', filters.block_id);
@@ -34,10 +34,14 @@ function buildQueryString(filters: Partial<CollectionFilters>): string {
   if (filters.race_id) params.set('race_id', filters.race_id);
   if (filters.rarity_tier_id) params.set('rarity_tier_id', filters.rarity_tier_id);
   if (filters.condition) params.set('condition', filters.condition);
+  if (filters.legal_status) params.set('legal_status', filters.legal_status);
   if (filters.min_qty !== undefined) params.set('min_qty', String(filters.min_qty));
   if (filters.sort) params.set('sort', filters.sort);
   if (filters.limit) params.set('limit', String(filters.limit));
   if (filters.cursor) params.set('cursor', filters.cursor);
+  if (filters.collection_id !== undefined) {
+    params.set('collection_id', filters.collection_id === null ? '__none__' : filters.collection_id);
+  }
   return params.toString();
 }
 

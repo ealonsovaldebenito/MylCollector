@@ -1,3 +1,31 @@
+/**
+ * File: apps/web/src/hooks/use-deck-builder.ts
+ *
+ * useDeckBuilder — Client hook para el Builder.
+ * Maneja el estado del mazo (metadata + cartas), validación en vivo y guardado/versionado.
+ *
+ * Contexto:
+ * - Builder UI: `BuilderWorkspace` compone navegador de cartas + editor de mazo + tabs (validación/estadísticas/mulligan/costeo).
+ *
+ * Relaciones / APIs:
+ * - POST `/api/v1/validate` (valida reglas del formato).
+ * - POST `/api/v1/decks` + PUT `/api/v1/decks/:deckId` (metadata).
+ * - POST `/api/v1/decks/:deckId/versions` + GET `/api/v1/deck-versions/:versionId` (versionado y cartas).
+ *
+ * Bugfixes / Notas:
+ * - Soporta selección de impresión por copia: cada copia es un `DeckCardSlot` con `deck_card_id` (client-only).
+ * - El payload a validación/guardado se agrega por `card_printing_id` para mantener compatibilidad con la API.
+ * - "Cartas clave" (estrella) se persisten en DB via `deck_version_cards.is_key_card` (no localStorage).
+ * - Metadata del mazo se auto-guardan por `PUT /api/v1/decks/:deckId` (sin crear versión).
+ * - "Cartas clave" se auto-guardan por `PUT /api/v1/decks/:deckId/key-cards` (sin crear versión).
+ * - Se auto-crea el mazo al tener `formatId` + `name` para que refrescar no pierda configuración.
+ *
+ * Changelog:
+ * - 2026-02-17: Persistencia de "cartas clave" en DB (is_key_card) + payload de version.
+ * - 2026-02-17: Auto-create deck + auto-save metadata/key cards (evita perder config al refrescar).
+ * - 2026-02-17 — Refactor: cartas por copia (impresión por copia) + key cards + payload agregado.
+ */
+
 'use client';
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
@@ -8,9 +36,12 @@ import type { LegalStatus, ValidationResult, Visibility } from '@myl/shared';
 // ============================================================================
 
 export interface DeckCardSlot {
+  /** Client-only id for this specific copy */
+  deck_card_id: string;
   card_printing_id: string;
-  qty: number;
   is_starting_gold: boolean;
+  /** Key card marker (persisted via `deck_version_cards.is_key_card`) */
+  is_key_card: boolean;
   card: {
     card_id: string;
     name: string;
@@ -38,11 +69,12 @@ interface CardGrouping {
 
 export interface DeckBuilderActions {
   addCard: (printing: CardPrintingData) => void;
-  removeCard: (printingId: string) => void;
-  setQty: (printingId: string, qty: number) => void;
-  replacePrinting: (fromPrintingId: string, toPrinting: CardPrintingData) => void;
-  setStartingGold: (printingId: string) => void;
+  duplicateCard: (deckCardId: string) => void;
+  removeCard: (deckCardId: string) => void;
+  replacePrinting: (deckCardId: string, toPrinting: CardPrintingData) => void;
+  setStartingGold: (deckCardId: string) => void;
   clearStartingGold: () => void;
+  toggleKeyCard: (cardId: string) => void;
   setFormat: (formatId: string) => void;
   setEditionId: (editionId: string | null) => void;
   setRaceId: (raceId: string | null) => void;
@@ -70,6 +102,7 @@ export interface DeckBuilderState {
   coverImageUrl: string;
   tagIds: string[];
   cards: DeckCardSlot[];
+  keyCardIds: string[];
   validation: ValidationResult | null;
   isValidating: boolean;
   isSaving: boolean;
@@ -116,6 +149,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
   const [coverImageUrl, setCoverImageUrlState] = useState<string>('');
   const [tagIds, setTagIdsState] = useState<string[]>([]);
   const [cards, setCards] = useState<DeckCardSlot[]>([]);
+  const [keyCardIds, setKeyCardIds] = useState<string[]>([]);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -123,9 +157,113 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
   const [error, setError] = useState<string | null>(null);
 
   const validateTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const autoCreateRef = useRef(false);
+  const autoSaveMetaTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const autoSaveKeysTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const keyCardIdSet = useMemo(() => new Set(keyCardIds), [keyCardIds]);
+
+  useEffect(() => {
+    setCards((prev) => prev.map((c) => ({ ...c, is_key_card: keyCardIdSet.has(c.card.card_id) })));
+  }, [keyCardIdSet]);
+
+  // Auto-create a deck as soon as we have required metadata (so refresh keeps config via /builder/:id).
+  useEffect(() => {
+    if (deckId || autoCreateRef.current) return;
+    if (!formatId || !name.trim()) return;
+
+    const t = setTimeout(async () => {
+      try {
+        autoCreateRef.current = true;
+        const res = await fetch('/api/v1/decks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            format_id: formatId,
+            edition_id: editionId ?? null,
+            race_id: raceId ?? null,
+            description: description.trim() ? description : undefined,
+            strategy: strategy.trim() ? strategy : undefined,
+            cover_image_url: coverImageUrl.trim() ? coverImageUrl : undefined,
+            tag_ids: tagIds,
+            visibility,
+          }),
+        });
+        const json = await res.json();
+        if (json.ok && json.data?.deck_id) {
+          setDeckId(json.data.deck_id as string);
+        } else {
+          autoCreateRef.current = false;
+        }
+      } catch {
+        autoCreateRef.current = false;
+      }
+    }, 600);
+
+    return () => clearTimeout(t);
+  }, [deckId, formatId, name, editionId, raceId, description, strategy, coverImageUrl, tagIds, visibility]);
+
+  // Auto-save deck metadata (format/race/edition/tags/etc.) without requiring "Guardar" (version).
+  useEffect(() => {
+    if (!deckId) return;
+    if (!name.trim() || !formatId) return; // evitar requests inválidos (400) cuando falta nombre o formato
+    if (autoSaveMetaTimerRef.current) clearTimeout(autoSaveMetaTimerRef.current);
+
+    autoSaveMetaTimerRef.current = setTimeout(async () => {
+      try {
+        const payload: Record<string, unknown> = {
+          name,
+          format_id: formatId,
+          edition_id: editionId ?? null,
+          race_id: raceId ?? null,
+          tag_ids: tagIds,
+          visibility,
+        };
+
+        if (description.trim()) payload.description = description.trim();
+        if (strategy.trim()) payload.strategy = strategy.trim();
+        if (coverImageUrl.trim()) payload.cover_image_url = coverImageUrl.trim();
+
+        await fetch(`/api/v1/decks/${deckId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // ignore auto-save failures
+      }
+    }, 500);
+
+    return () => {
+      if (autoSaveMetaTimerRef.current) clearTimeout(autoSaveMetaTimerRef.current);
+    };
+  }, [deckId, name, formatId, editionId, raceId, description, strategy, coverImageUrl, tagIds, visibility]);
+
+  // Auto-save key cards to DB (deck-level) so refresh keeps stars even without saving a new version.
+  useEffect(() => {
+    if (!deckId) return;
+    if (autoSaveKeysTimerRef.current) clearTimeout(autoSaveKeysTimerRef.current);
+
+    autoSaveKeysTimerRef.current = setTimeout(async () => {
+      try {
+        await fetch(`/api/v1/decks/${deckId}/key-cards`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ card_ids: keyCardIds }),
+        });
+      } catch {
+        // ignore
+      }
+    }, 400);
+
+    return () => {
+      if (autoSaveKeysTimerRef.current) clearTimeout(autoSaveKeysTimerRef.current);
+    };
+  }, [deckId, keyCardIds]);
 
   // Computed: total cards
-  const totalCards = useMemo(() => cards.reduce((sum, c) => sum + c.qty, 0), [cards]);
+  const totalCards = useMemo(() => cards.length, [cards]);
 
   // Computed: grouped by type
   const groupedByType = useMemo(() => {
@@ -136,14 +274,14 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
       const existing = groups.get(key);
       if (existing) {
         existing.cards.push(slot);
-        existing.totalQty += slot.qty;
+        existing.totalQty += 1;
       } else {
         groups.set(key, {
           typeName: slot.card.card_type.name,
           typeCode: key,
           sortOrder: slot.card.card_type.sort_order,
           cards: [slot],
-          totalQty: slot.qty,
+          totalQty: 1,
         });
       }
     }
@@ -161,6 +299,30 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     return sorted;
   }, [cards]);
 
+  function aggregateCardsPayload(list: DeckCardSlot[]) {
+    const map = new Map<string, { qty: number; is_starting_gold: boolean; is_key_card: boolean }>();
+    for (const c of list) {
+      const existing = map.get(c.card_printing_id);
+      if (existing) {
+        existing.qty += 1;
+        existing.is_starting_gold = existing.is_starting_gold || c.is_starting_gold;
+        existing.is_key_card = existing.is_key_card || c.is_key_card;
+      } else {
+        map.set(c.card_printing_id, {
+          qty: 1,
+          is_starting_gold: c.is_starting_gold,
+          is_key_card: c.is_key_card,
+        });
+      }
+    }
+    return Array.from(map.entries()).map(([card_printing_id, v]) => ({
+      card_printing_id,
+      qty: v.qty,
+      is_starting_gold: v.is_starting_gold,
+      is_key_card: v.is_key_card,
+    }));
+  }
+
   // --- Live validation ---
   const triggerValidation = useCallback(() => {
     if (!formatId) return;
@@ -168,20 +330,16 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
 
     validateTimerRef.current = setTimeout(async () => {
       setIsValidating(true);
-      try {
-        const payload = {
-          format_id: formatId,
-          cards: cards.map((c) => ({
-            card_printing_id: c.card_printing_id,
-            qty: c.qty,
-            is_starting_gold: c.is_starting_gold,
-          })),
-        };
-        const res = await fetch('/api/v1/validate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+        try {
+          const payload = {
+            format_id: formatId,
+            cards: aggregateCardsPayload(cards),
+          };
+          const res = await fetch('/api/v1/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
         const json = await res.json();
         if (json.ok) {
           setValidation(json.data);
@@ -210,20 +368,16 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
 
   const addCard = useCallback((printing: CardPrintingData) => {
     setCards((prev) => {
-      const existing = prev.find((c) => c.card_printing_id === printing.card_printing_id);
-      if (existing) {
-        // Check limits
-        const maxQty = printing.card.is_unique ? 1 : 3;
-        if (existing.qty >= maxQty) return prev;
-        return prev.map((c) =>
-          c.card_printing_id === printing.card_printing_id ? { ...c, qty: c.qty + 1 } : c,
-        );
-      }
-      // New card
+      const currentQtyForCard = prev.filter((c) => c.card.card_id === printing.card.card_id).length;
+      const maxQty = printing.card.is_unique ? 1 : 3;
+      if (currentQtyForCard >= maxQty) return prev;
+
       const slot: DeckCardSlot = {
+        deck_card_id:
+          typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
         card_printing_id: printing.card_printing_id,
-        qty: 1,
         is_starting_gold: false,
+        is_key_card: keyCardIdSet.has(printing.card.card_id),
         card: printing.card,
         edition: printing.edition,
         rarity_tier: printing.rarity_tier,
@@ -233,38 +387,38 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
       return [...prev, slot];
     });
     setIsDirty(true);
-  }, []);
+  }, [keyCardIdSet]);
 
-  const removeCard = useCallback((printingId: string) => {
+  const duplicateCard = useCallback((deckCardId: string) => {
     setCards((prev) => {
-      const existing = prev.find((c) => c.card_printing_id === printingId);
-      if (!existing) return prev;
-      if (existing.qty > 1) {
-        return prev.map((c) =>
-          c.card_printing_id === printingId ? { ...c, qty: c.qty - 1 } : c,
-        );
-      }
-      return prev.filter((c) => c.card_printing_id !== printingId);
+      const from = prev.find((c) => c.deck_card_id === deckCardId);
+      if (!from) return prev;
+      const currentQtyForCard = prev.filter((c) => c.card.card_id === from.card.card_id).length;
+      const maxQty = from.card.is_unique ? 1 : 3;
+      if (currentQtyForCard >= maxQty) return prev;
+
+      const next: DeckCardSlot = {
+        ...from,
+        deck_card_id:
+          typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+        is_starting_gold: false,
+        is_key_card: keyCardIdSet.has(from.card.card_id),
+      };
+      return [...prev, next];
     });
     setIsDirty(true);
-  }, []);
+  }, [keyCardIdSet]);
 
-  const setQty = useCallback((printingId: string, qty: number) => {
-    if (qty <= 0) {
-      setCards((prev) => prev.filter((c) => c.card_printing_id !== printingId));
-    } else {
-      setCards((prev) =>
-        prev.map((c) => (c.card_printing_id === printingId ? { ...c, qty } : c)),
-      );
-    }
+  const removeCard = useCallback((deckCardId: string) => {
+    setCards((prev) => prev.filter((c) => c.deck_card_id !== deckCardId));
     setIsDirty(true);
   }, []);
 
-  const setStartingGold = useCallback((printingId: string) => {
+  const setStartingGold = useCallback((deckCardId: string) => {
     setCards((prev) =>
       prev.map((c) => ({
         ...c,
-        is_starting_gold: c.card_printing_id === printingId,
+        is_starting_gold: c.deck_card_id === deckCardId,
       })),
     );
     setIsDirty(true);
@@ -285,52 +439,20 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     setIsDirty(true);
   }, []);
 
-  const replacePrinting = useCallback((fromPrintingId: string, toPrinting: CardPrintingData) => {
+  const replacePrinting = useCallback((deckCardId: string, toPrinting: CardPrintingData) => {
     setCards((prev) => {
-      const from = prev.find((c) => c.card_printing_id === fromPrintingId);
-      if (!from) return prev;
-
-      const toPrintingId = toPrinting.card_printing_id;
-      if (toPrintingId === fromPrintingId) return prev;
-
-      const updatedSlot: DeckCardSlot = {
-        ...from,
-        card_printing_id: toPrintingId,
-        edition: toPrinting.edition,
-        rarity_tier: toPrinting.rarity_tier,
-        image_url: toPrinting.image_url,
-        legal_status: toPrinting.legal_status,
-        card: toPrinting.card,
-      };
-
-      // Remove old slot
-      let next = prev.filter((c) => c.card_printing_id !== fromPrintingId);
-
-      // Merge if target printing already exists
-      const existingTarget = next.find((c) => c.card_printing_id === toPrintingId);
-      if (existingTarget) {
-        next = next.map((c) =>
-          c.card_printing_id === toPrintingId
-            ? {
-              ...c,
-              qty: c.qty + from.qty,
-              is_starting_gold: c.is_starting_gold || from.is_starting_gold,
-            }
-            : c,
-        );
-      } else {
-        next = [...next, updatedSlot];
-      }
-
-      // Preserve "oro inicial" uniqueness
-      if (from.is_starting_gold) {
-        next = next.map((c) => ({
+      return prev.map((c) => {
+        if (c.deck_card_id !== deckCardId) return c;
+        return {
           ...c,
-          is_starting_gold: c.card_printing_id === toPrintingId,
-        }));
-      }
-
-      return next;
+          card_printing_id: toPrinting.card_printing_id,
+          edition: toPrinting.edition,
+          rarity_tier: toPrinting.rarity_tier,
+          image_url: toPrinting.image_url,
+          legal_status: toPrinting.legal_status,
+          card: toPrinting.card,
+        };
+      });
     });
     setIsDirty(true);
   }, []);
@@ -357,6 +479,16 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
 
   const setVisibility = useCallback((next: Visibility) => {
     setVisibilityState(next);
+    setIsDirty(true);
+  }, []);
+
+  const toggleKeyCard = useCallback((cardId: string) => {
+    setKeyCardIds((prev) => {
+      const set = new Set(prev);
+      if (set.has(cardId)) set.delete(cardId);
+      else set.add(cardId);
+      return Array.from(set);
+    });
     setIsDirty(true);
   }, []);
 
@@ -426,11 +558,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
 
       // Create version
       const versionPayload = {
-        cards: cards.map((c) => ({
-          card_printing_id: c.card_printing_id,
-          qty: c.qty,
-          is_starting_gold: c.is_starting_gold,
-        })),
+        cards: aggregateCardsPayload(cards),
       };
 
       const vRes = await fetch(`/api/v1/decks/${currentDeckId}/versions`, {
@@ -466,6 +594,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
       }
 
       const deck = json.data;
+      const deckKeyIdsFromDeck = (deck.key_card_ids ?? []) as string[];
       setDeckId(deck.deck_id);
       setNameState(deck.name);
       setFormatId(deck.format_id);
@@ -476,6 +605,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
       setCoverImageUrlState(deck.cover_image_url ?? '');
       setTagIdsState(deck.tag_ids ?? []);
       setVisibilityState((deck.visibility as Visibility) ?? 'PRIVATE');
+      setKeyCardIds(deckKeyIdsFromDeck);
 
       // Load latest version cards
       if (deck.latest_version) {
@@ -484,13 +614,29 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
         const vRes = await fetch(`/api/v1/deck-versions/${currentVersionId}`);
         const vJson = await vRes.json();
         if (vJson.ok && vJson.data.cards) {
+          const fallbackKeyIds = new Set<string>();
+          if (deckKeyIdsFromDeck.length === 0) {
+            // If deck-level key cards aren't available yet, fallback to snapshot on the latest version.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            for (const row of vJson.data.cards as any[]) {
+              if (row.is_key_card) {
+                const cid = row.card_printing?.card?.card_id as string | undefined;
+                if (cid) fallbackKeyIds.add(cid);
+              }
+            }
+            if (fallbackKeyIds.size > 0) setKeyCardIds(Array.from(fallbackKeyIds));
+          }
+
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const loadedCards: DeckCardSlot[] = vJson.data.cards.map((row: any) => {
+          const loadedCards: DeckCardSlot[] = vJson.data.cards.flatMap((row: any) => {
             const cp = row.card_printing;
-            return {
+            const qty = Number(row.qty ?? 0);
+            return Array.from({ length: Math.max(0, qty) }).map((_, i) => ({
+              deck_card_id:
+                typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
               card_printing_id: cp.card_printing_id,
-              qty: row.qty,
-              is_starting_gold: row.is_starting_gold,
+              is_starting_gold: !!row.is_starting_gold && i === 0,
+              is_key_card: deckKeyIdsFromDeck.includes(cp.card.card_id) || fallbackKeyIds.has(cp.card.card_id),
               card: {
                 card_id: cp.card.card_id,
                 name: cp.card.name,
@@ -506,7 +652,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
               rarity_tier: cp.rarity_tier,
               image_url: cp.image_url,
               legal_status: cp.legal_status,
-            };
+            }));
           });
           setCards(loadedCards);
         }
@@ -531,7 +677,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     setValidation(null);
     setIsDirty(false);
     setError(null);
-  }, []);
+  }, [keyCardIdSet]);
 
   return {
     // State
@@ -547,6 +693,7 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     coverImageUrl,
     tagIds,
     cards,
+    keyCardIds,
     validation,
     isValidating,
     isSaving,
@@ -556,11 +703,12 @@ export function useDeckBuilder(initialFormatId?: string): DeckBuilderState & Dec
     groupedByType,
     // Actions
     addCard,
+    duplicateCard,
     removeCard,
-    setQty,
     replacePrinting,
     setStartingGold,
     clearStartingGold,
+    toggleKeyCard,
     setFormat,
     setEditionId: setEditionIdAction,
     setRaceId: setRaceIdAction,

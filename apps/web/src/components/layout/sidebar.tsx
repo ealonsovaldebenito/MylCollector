@@ -1,7 +1,15 @@
+/**
+ * Sidebar — Navegación principal de la app (desktop).
+ *
+ * Changelog:
+ *   2026-02-17 — Rediseño visual v2 + reorganización completa de rutas
+ */
+
 'use client';
 
 import { useMemo, memo } from 'react';
 import {
+  LayoutDashboard,
   BookOpen,
   Hammer,
   Library,
@@ -11,11 +19,14 @@ import {
   ScrollText,
   ChevronRight,
   Sparkles,
+  Settings,
 } from 'lucide-react';
 import { useUser } from '@/contexts/user-context';
+import { ThemeToggle } from '@/components/layout/theme-toggle';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 interface NavItem {
   label: string;
@@ -33,36 +44,38 @@ interface NavGroup {
 
 const navGroups: NavGroup[] = [
   {
-    label: 'Explorar',
+    label: 'Principal',
     items: [
+      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, requiresAuth: true },
       { label: 'Catálogo', href: '/catalog', icon: BookOpen },
+    ],
+  },
+  {
+    label: 'Herramientas',
+    items: [
+      { label: 'Constructor', href: '/decks', icon: Hammer, requiresAuth: true },
+      { label: 'Mi Colección', href: '/collection', icon: Library, requiresAuth: true },
       { label: 'Precios', href: '/prices', icon: DollarSign },
+    ],
+  },
+  {
+    label: 'Comunidad',
+    items: [
+      { label: 'Explorar Mazos', href: '/community', icon: Users },
       { label: 'Recursos', href: '/resources', icon: ScrollText },
     ],
   },
   {
-    label: 'Mis herramientas',
+    label: 'Cuenta',
     items: [
-      { label: 'Constructor', href: '/decks', icon: Hammer, requiresAuth: true, badge: 'Pro' },
-      { label: 'Mi Colección', href: '/collection', icon: Library, requiresAuth: true },
-    ],
-  },
-  {
-    label: 'Social',
-    items: [
-      { label: 'Comunidad', href: '/community', icon: Users, requiresAuth: true },
-    ],
-  },
-  {
-    label: 'Gestión',
-    items: [
+      { label: 'Configuración', href: '/settings', icon: Settings, requiresAuth: true },
       { label: 'Admin', href: '/admin', icon: Shield, requiresAdmin: true },
     ],
   },
 ];
 
 function SidebarComponent() {
-  const { user, isLoading, isAdmin } = useUser();
+  const { user, profile, isLoading, isAdmin } = useUser();
   const pathname = usePathname();
 
   const filteredGroups = useMemo(
@@ -81,11 +94,11 @@ function SidebarComponent() {
   );
 
   return (
-    <aside className="hidden w-60 flex-col border-r border-border/50 bg-card/80 backdrop-blur-sm md:flex">
+    <aside className="hidden w-56 flex-col border-r border-border/30 bg-surface-1/80 backdrop-blur-sm md:flex">
       {/* Logo */}
       <div className="flex h-14 items-center gap-2.5 px-5">
-        <Link href="/catalog" className="flex items-center gap-2.5 transition-opacity hover:opacity-80">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-amber-500 text-sm font-bold text-white shadow-md shadow-indigo-500/20">
+        <Link href={user ? '/dashboard' : '/catalog'} className="flex items-center gap-2.5 transition-opacity hover:opacity-80">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white shadow-lg shadow-primary/20">
             M
           </div>
           <span className="font-display text-lg font-bold tracking-tight">MYL</span>
@@ -99,8 +112,8 @@ function SidebarComponent() {
             {[1, 2, 3].map((g) => (
               <div key={g} className="space-y-1.5">
                 <div className="h-3 w-16 skeleton-shimmer rounded" />
-                <div className="h-8 skeleton-shimmer rounded-lg" />
-                <div className="h-8 skeleton-shimmer rounded-lg" />
+                <div className="h-9 skeleton-shimmer rounded-xl" />
+                <div className="h-9 skeleton-shimmer rounded-xl" />
               </div>
             ))}
           </div>
@@ -108,12 +121,15 @@ function SidebarComponent() {
           filteredGroups.map((group, gi) => (
             <div
               key={group.label}
-              className={cn('animate-fade-in', gi > 0 && 'mt-5')}
+              className={cn('animate-fade-in', gi > 0 && 'mt-1')}
               style={{ animationDelay: `${gi * 0.05}s` }}
             >
+              {/* Separator between groups */}
+              {gi > 0 && <hr className="mx-2 mb-2 border-border/20" />}
+
               {/* Group label */}
               <div className="mb-1.5 px-3">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
                   {group.label}
                 </span>
               </div>
@@ -128,21 +144,18 @@ function SidebarComponent() {
                       key={item.href}
                       href={item.href}
                       className={cn(
-                        'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
+                        'group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-200',
                         isActive
-                          ? 'bg-accent/15 text-foreground font-medium shadow-sm'
-                          : 'text-muted-foreground hover:bg-accent/8 hover:text-foreground',
+                          ? 'bg-gradient-to-r from-accent/15 to-transparent text-foreground font-medium'
+                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground',
                       )}
                     >
-                      {/* Active indicator bar */}
-                      {isActive && (
-                        <div className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-accent" />
-                      )}
-
                       <Icon
                         className={cn(
-                          'h-4 w-4 shrink-0 transition-colors',
-                          isActive ? 'text-accent' : 'group-hover:text-accent',
+                          'h-4 w-4 shrink-0 transition-all duration-200',
+                          isActive
+                            ? 'text-accent'
+                            : 'group-hover:text-accent group-hover:scale-110',
                         )}
                       />
                       <span className="flex-1">{item.label}</span>
@@ -155,8 +168,8 @@ function SidebarComponent() {
 
                       <ChevronRight
                         className={cn(
-                          'h-3 w-3 text-muted-foreground/40 transition-all',
-                          isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-60',
+                          'h-3 w-3 text-muted-foreground/30 transition-all duration-200',
+                          isActive ? 'opacity-100 text-accent/60' : 'opacity-0 group-hover:opacity-50',
                         )}
                       />
                     </Link>
@@ -170,32 +183,44 @@ function SidebarComponent() {
 
       {/* Footer — login prompt */}
       {!isLoading && !user && (
-        <div className="border-t border-border/50 p-3">
+        <div className="border-t border-border/20 p-3 space-y-2">
           <Link href="/login">
-            <div className="group flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-amber-600 px-4 py-2.5 text-center text-xs font-semibold text-white shadow-md shadow-indigo-500/20 transition-all hover:shadow-lg hover:-translate-y-px">
+            <div className="group flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary/90 px-4 py-2.5 text-center text-xs font-semibold text-white shadow-md shadow-primary/20 transition-all hover:shadow-lg hover:-translate-y-px">
               <Sparkles className="h-3.5 w-3.5 transition-transform group-hover:rotate-12" />
               Iniciar sesión
             </div>
           </Link>
+          <div className="flex justify-center">
+            <ThemeToggle />
+          </div>
         </div>
       )}
 
       {/* User footer when logged in */}
       {!isLoading && user && (
-        <div className="border-t border-border/50 px-4 py-3">
-          <Link
-            href="/settings"
-            className="flex items-center gap-2.5 rounded-lg px-1 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-amber-500 text-[10px] font-bold text-white">
-              {(user.user_metadata?.display_name || user.email || 'U')
-                .charAt(0)
-                .toUpperCase()}
-            </div>
-            <span className="truncate text-xs">
-              {user.user_metadata?.display_name || user.email?.split('@')[0] || 'Usuario'}
-            </span>
-          </Link>
+        <div className="border-t border-border/20 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/settings"
+              className="flex flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-sm text-muted-foreground transition-all duration-200 hover:bg-secondary/50 hover:text-foreground"
+            >
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={profile?.avatar_url ?? undefined} alt={profile?.display_name ?? user.email ?? 'Usuario'} />
+                <AvatarFallback className="bg-primary/15 text-[11px] font-semibold">
+                  {(profile?.display_name || user.email || 'U').charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">
+                  {profile?.display_name || user.email?.split('@')[0] || 'Usuario'}
+                </p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {profile?.role === 'admin' ? 'Admin' : 'Jugador'}
+                </p>
+              </div>
+            </Link>
+            <ThemeToggle />
+          </div>
         </div>
       )}
     </aside>

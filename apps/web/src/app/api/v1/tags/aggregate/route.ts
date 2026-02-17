@@ -44,7 +44,7 @@ export const POST = withApiHandler(async (request) => {
   const agg = new Map<string, { tag_id: string; name: string; slug: string; score: number; cards: number }>();
 
   type TagJoinRow = { card_id: string; tag: { tag_id: string; name: string; slug: string } };
-  for (const row of (data ?? []) as TagJoinRow[]) {
+  for (const row of (data ?? []) as unknown as TagJoinRow[]) {
     const cardId = row.card_id as string;
     const qty = qtyByCardId.get(cardId) ?? 1;
     const tag = row.tag;

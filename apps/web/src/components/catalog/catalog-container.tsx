@@ -66,7 +66,7 @@ export function CatalogContainer() {
   return (
     <div className="flex h-full flex-col">
       {/* Top Bar con búsqueda y controles */}
-      <div className="flex-shrink-0 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="flex-shrink-0 border-b border-border/30 bg-surface-1/80 backdrop-blur-xl">
         <div className="p-4 space-y-3">
           {/* Búsqueda principal */}
           <div className="flex items-center gap-2">
@@ -136,7 +136,7 @@ export function CatalogContainer() {
       <div className="flex flex-1 overflow-hidden">
         {/* Panel de filtros lateral */}
         {showFilters && (
-          <aside className="w-72 flex-shrink-0 border-r border-border overflow-y-auto">
+          <aside className="w-72 flex-shrink-0 border-r border-border/30 bg-surface-1/50 backdrop-blur-sm overflow-y-auto">
             <div className="p-4">
               <CatalogFilters
                 filters={filterValues}

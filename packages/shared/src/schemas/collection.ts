@@ -2,16 +2,24 @@ import { z } from 'zod';
 import { paginationQuerySchema } from './pagination.js';
 
 /**
- * Card condition enum
+ * Card condition enum (alineado con card_conditions de BD)
+ * Valores:
+ *  - PERFECTA (9-10)
+ *  - CASI PERFECTA (8)
+ *  - EXCELENTE (7)
+ *  - BUENA (6)
+ *  - POCO USO (5)
+ *  - JUGADA (4)
+ *  - MALAS CONDICIONES (1-3)
  */
 export const cardConditionSchema = z.enum([
-  'MINT',
-  'NEAR_MINT',
-  'EXCELLENT',
-  'GOOD',
-  'LIGHT_PLAYED',
-  'PLAYED',
-  'POOR',
+  'PERFECTA',
+  'CASI PERFECTA',
+  'EXCELENTE',
+  'BUENA',
+  'POCO USO',
+  'JUGADA',
+  'MALAS CONDICIONES',
 ]);
 export type CardCondition = z.infer<typeof cardConditionSchema>;
 
@@ -22,9 +30,12 @@ export const userCardSchema = z.object({
   user_card_id: z.string().uuid(),
   user_id: z.string().uuid(),
   card_printing_id: z.string().uuid(),
+  collection_id: z.string().uuid().nullable().optional(),
   qty: z.number().int().positive(),
-  condition: cardConditionSchema.default('NEAR_MINT'),
+  condition: cardConditionSchema.default('PERFECTA'),
   notes: z.string().nullable().optional(),
+  user_price: z.number().positive().nullable().optional(),
+  is_for_sale: z.boolean().default(false),
   acquired_at: z.string().datetime().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
@@ -77,6 +88,8 @@ export const collectionStatsSchema = z.object({
   total_cards: z.number().int().nonnegative(),
   total_printings: z.number().int().nonnegative(),
   total_unique_cards: z.number().int().nonnegative(),
+  total_user_value: z.number().nonnegative().default(0),
+  total_store_value: z.number().nonnegative().default(0),
   by_block: z.record(
     z.string(),
     z.object({
@@ -147,8 +160,11 @@ export type EditionCompletion = z.infer<typeof editionCompletionSchema>;
 export const addToCollectionSchema = z.object({
   card_printing_id: z.string().uuid(),
   qty: z.number().int().positive().default(1),
-  condition: cardConditionSchema.default('NEAR_MINT'),
+  condition: cardConditionSchema.default('PERFECTA'),
   notes: z.string().max(500).optional(),
+  user_price: z.number().positive().nullable().optional(),
+  is_for_sale: z.boolean().optional(),
+  collection_id: z.string().uuid().nullable().optional(),
   acquired_at: z.string().datetime().optional(),
 });
 export type AddToCollection = z.infer<typeof addToCollectionSchema>;
@@ -160,6 +176,8 @@ export const updateCollectionItemSchema = z.object({
   qty: z.number().int().positive().optional(),
   condition: cardConditionSchema.optional(),
   notes: z.string().max(500).nullable().optional(),
+  user_price: z.number().positive().nullable().optional(),
+  is_for_sale: z.boolean().optional(),
   acquired_at: z.string().datetime().nullable().optional(),
 });
 export type UpdateCollectionItem = z.infer<typeof updateCollectionItemSchema>;
@@ -172,7 +190,7 @@ export const bulkCollectionUpdateSchema = z.object({
     z.object({
       card_printing_id: z.string().uuid(),
       qty: z.number().int().positive(),
-      condition: cardConditionSchema.default('NEAR_MINT'),
+      condition: cardConditionSchema.default('PERFECTA'),
       notes: z.string().max(500).optional(),
     }),
   ),
@@ -202,6 +220,8 @@ export const collectionFiltersSchema = paginationQuerySchema.extend({
       'acquired_desc',
       'cost_asc',
       'cost_desc',
+      'price_asc',
+      'price_desc',
     ])
     .default('name_asc')
     .optional(),
@@ -215,7 +235,7 @@ export const collectionCsvLineSchema = z.object({
   card_name: z.string(),
   edition_hint: z.string().optional(),
   qty: z.number().int().positive(),
-  condition: cardConditionSchema.default('NEAR_MINT'),
+  condition: cardConditionSchema.default('PERFECTA'),
   notes: z.string().optional(),
 });
 export type CollectionCsvLine = z.infer<typeof collectionCsvLineSchema>;
@@ -235,3 +255,50 @@ export const collectionImportResultSchema = z.object({
   ),
 });
 export type CollectionImportResult = z.infer<typeof collectionImportResultSchema>;
+
+/**
+ * User collection (folder)
+ */
+export const userCollectionSchema = z.object({
+  collection_id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).nullable().optional(),
+  color: z.string().max(20).default('#6366f1'),
+  sort_order: z.number().int().default(0),
+  card_count: z.number().int().nonnegative().default(0),
+  total_value: z.number().nonnegative().default(0),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type UserCollection = z.infer<typeof userCollectionSchema>;
+
+/**
+ * Create collection
+ */
+export const createCollectionSchema = z.object({
+  name: z.string().min(1, 'El nombre es obligatorio').max(100),
+  description: z.string().max(500).optional(),
+  color: z.string().max(20).optional(),
+});
+export type CreateCollection = z.infer<typeof createCollectionSchema>;
+
+/**
+ * Update collection
+ */
+export const updateCollectionSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).nullable().optional(),
+  color: z.string().max(20).optional(),
+  sort_order: z.number().int().optional(),
+});
+export type UpdateCollection = z.infer<typeof updateCollectionSchema>;
+
+/**
+ * Move cards between collections
+ */
+export const moveCardsSchema = z.object({
+  user_card_ids: z.array(z.string().uuid()).min(1),
+  target_collection_id: z.string().uuid().nullable(),
+});
+export type MoveCards = z.infer<typeof moveCardsSchema>;

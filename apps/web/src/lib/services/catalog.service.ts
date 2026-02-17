@@ -72,3 +72,13 @@ export async function getTags(supabase: Client) {
   if (error) throw error;
   return data;
 }
+
+export async function getCardConditions(supabase: Client) {
+  const { data, error } = await supabase
+    .from('card_conditions')
+    .select('condition_id, code, name, sort_order')
+    .order('sort_order', { ascending: false });
+
+  if (error) throw error;
+  return data;
+}

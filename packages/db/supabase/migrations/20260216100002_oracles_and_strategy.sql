@@ -4,6 +4,7 @@
 -- Doc reference: 03_DATA_MODEL_SQL.md
 -- Changelog:
 --   2026-02-16 — Initial creation
+--   2026-02-17 — Make RLS policies idempotent (DROP POLICY IF EXISTS) for reruns.
 
 -- ============================================================================
 -- CARD ORACLES: official rulings, errata, and ability explanations per card
@@ -77,9 +78,11 @@ ALTER TABLE deck_strategy_sections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deck_strategy_card_refs ENABLE ROW LEVEL SECURITY;
 
 -- Oracles: public read, admin write
+DROP POLICY IF EXISTS card_oracles_select ON card_oracles;
 CREATE POLICY card_oracles_select ON card_oracles FOR SELECT USING (true);
 
 -- Strategy: read if deck is visible/owned, write if owned
+DROP POLICY IF EXISTS deck_strategy_sections_select ON deck_strategy_sections;
 CREATE POLICY deck_strategy_sections_select ON deck_strategy_sections
   FOR SELECT USING (
     EXISTS (
@@ -89,6 +92,7 @@ CREATE POLICY deck_strategy_sections_select ON deck_strategy_sections
     )
   );
 
+DROP POLICY IF EXISTS deck_strategy_sections_insert ON deck_strategy_sections;
 CREATE POLICY deck_strategy_sections_insert ON deck_strategy_sections
   FOR INSERT WITH CHECK (
     EXISTS (
@@ -98,6 +102,7 @@ CREATE POLICY deck_strategy_sections_insert ON deck_strategy_sections
     )
   );
 
+DROP POLICY IF EXISTS deck_strategy_sections_update ON deck_strategy_sections;
 CREATE POLICY deck_strategy_sections_update ON deck_strategy_sections
   FOR UPDATE USING (
     EXISTS (
@@ -107,6 +112,7 @@ CREATE POLICY deck_strategy_sections_update ON deck_strategy_sections
     )
   );
 
+DROP POLICY IF EXISTS deck_strategy_sections_delete ON deck_strategy_sections;
 CREATE POLICY deck_strategy_sections_delete ON deck_strategy_sections
   FOR DELETE USING (
     EXISTS (
@@ -116,5 +122,6 @@ CREATE POLICY deck_strategy_sections_delete ON deck_strategy_sections
     )
   );
 
+DROP POLICY IF EXISTS deck_strategy_card_refs_select ON deck_strategy_card_refs;
 CREATE POLICY deck_strategy_card_refs_select ON deck_strategy_card_refs
   FOR SELECT USING (true);

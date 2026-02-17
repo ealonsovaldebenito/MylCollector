@@ -4,6 +4,7 @@
 -- Doc reference: 03_DATA_MODEL_SQL.md
 -- Changelog:
 --   2026-02-16 — Initial creation
+--   2026-02-17 — Idempotent policies + remove dependency on user_profiles (use roles/user_roles).
 
 -- ============================================================================
 -- STORES: add scraper configuration fields
@@ -65,20 +66,42 @@ CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
 -- ============================================================================
 ALTER TABLE store_printing_links ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS store_printing_links_select ON store_printing_links;
 CREATE POLICY store_printing_links_select ON store_printing_links
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS store_printing_links_admin_insert ON store_printing_links;
 CREATE POLICY store_printing_links_admin_insert ON store_printing_links
   FOR INSERT WITH CHECK (
-    EXISTS (SELECT 1 FROM user_profiles up WHERE up.user_id = auth.uid() AND up.role = 'admin')
+    EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.role_id = ur.role_id
+      WHERE ur.user_id = auth.uid()
+        AND r.name = 'admin'
+    )
   );
 
+DROP POLICY IF EXISTS store_printing_links_admin_update ON store_printing_links;
 CREATE POLICY store_printing_links_admin_update ON store_printing_links
   FOR UPDATE USING (
-    EXISTS (SELECT 1 FROM user_profiles up WHERE up.user_id = auth.uid() AND up.role = 'admin')
+    EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.role_id = ur.role_id
+      WHERE ur.user_id = auth.uid()
+        AND r.name = 'admin'
+    )
   );
 
+DROP POLICY IF EXISTS store_printing_links_admin_delete ON store_printing_links;
 CREATE POLICY store_printing_links_admin_delete ON store_printing_links
   FOR DELETE USING (
-    EXISTS (SELECT 1 FROM user_profiles up WHERE up.user_id = auth.uid() AND up.role = 'admin')
+    EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.role_id = ur.role_id
+      WHERE ur.user_id = auth.uid()
+        AND r.name = 'admin'
+    )
   );

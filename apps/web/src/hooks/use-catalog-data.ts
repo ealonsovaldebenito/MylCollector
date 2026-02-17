@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import type { Block, Edition, CardType, Race, RarityTier, Tag } from '@myl/shared';
+import type { Block, Edition, CardType, Race, RarityTier, Tag, CardConditionRef } from '@myl/shared';
 
 interface CatalogData {
   blocks: Block[];
@@ -10,6 +10,7 @@ interface CatalogData {
   races: Race[];
   rarities: RarityTier[];
   tags: Tag[];
+  conditions: CardConditionRef[];
   isLoading: boolean;
 }
 
@@ -26,18 +27,20 @@ export function useCatalogData(): CatalogData {
   const [races, setRaces] = useState<Race[]>([]);
   const [rarities, setRarities] = useState<RarityTier[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [conditions, setConditions] = useState<CardConditionRef[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [b, e, ct, r, rt, t] = await Promise.all([
+      const [b, e, ct, r, rt, t, cond] = await Promise.all([
         fetchJson<Block>('/api/v1/catalog/blocks'),
         fetchJson<Edition>('/api/v1/catalog/editions'),
         fetchJson<CardType>('/api/v1/catalog/card-types'),
         fetchJson<Race>('/api/v1/catalog/races'),
         fetchJson<RarityTier>('/api/v1/catalog/rarities'),
         fetchJson<Tag>('/api/v1/catalog/tags'),
+        fetchJson<CardConditionRef>('/api/v1/catalog/conditions'),
       ]);
       setBlocks(b);
       setEditions(e);
@@ -45,6 +48,7 @@ export function useCatalogData(): CatalogData {
       setRaces(r);
       setRarities(rt);
       setTags(t);
+      setConditions(cond);
     } finally {
       setIsLoading(false);
     }
@@ -54,5 +58,5 @@ export function useCatalogData(): CatalogData {
     load();
   }, [load]);
 
-  return { blocks, editions, cardTypes, races, rarities, tags, isLoading };
+  return { blocks, editions, cardTypes, races, rarities, tags, conditions, isLoading };
 }

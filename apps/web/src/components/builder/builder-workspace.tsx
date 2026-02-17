@@ -1,3 +1,22 @@
+/**
+ * File: apps/web/src/components/builder/builder-workspace.tsx
+ *
+ * BuilderWorkspace — Layout principal del constructor de mazos.
+ * Orquesta: navegador de cartas, editor del mazo, validación, estadísticas, mulligan y costeo.
+ *
+ * Relaciones:
+ * - Estado/lógica: `useDeckBuilder`.
+ * - UI: `BuilderCardBrowser`, `BuilderDeckEditor`, `BuilderValidationPanel`, `BuilderStatsPanel`, `BuilderMulliganSimulator`, `BuilderCostPanel`.
+ *
+ * Bugfixes / Notas:
+ * - Soporta modelo por copia (impresión por copia): el botón + del editor duplica la copia seleccionada.
+ * - Agregación de payloads (tags sugeridas) por `card_id` para evitar depender de `qty` en el slot.
+ *
+ * Changelog:
+ * - 2026-02-17: Persistencia (auto-nav /builder/:deckId).
+ * - 2026-02-17 — Refactor: compatibilidad con cartas por copia + duplicación por `deck_card_id`.
+ */
+
 'use client';
 
 import React, { useState, useMemo } from 'react';
@@ -42,6 +61,16 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
   const [isLoadingAvailableRaces, setIsLoadingAvailableRaces] = useState(false);
 
   const builder = useDeckBuilder(initialFormatId);
+  const [autoNavigated, setAutoNavigated] = useState(false);
+
+  // If we auto-created a deck (so it persists), ensure URL becomes /builder/:deckId
+  React.useEffect(() => {
+    if (autoNavigated) return;
+    if (initialDeckId) return;
+    if (!builder.deckId) return;
+    router.replace(`/builder/${builder.deckId}`);
+    setAutoNavigated(true);
+  }, [autoNavigated, initialDeckId, builder.deckId, router]);
 
   React.useEffect(() => {
     setTagsCatalog(tags);
@@ -160,19 +189,8 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
     (builder.validation?.messages?.length ?? 0) > 0 ||
     (builder.validation ? !builder.validation.is_valid : false);
 
-  // Wrappers for deck editor callbacks (convert printingId to slot data)
-  const handleDeckAddCard = (printingId: string) => {
-    const slot = builder.cards.find((c) => c.card_printing_id === printingId);
-    if (slot) {
-      builder.addCard({
-        card_printing_id: slot.card_printing_id,
-        image_url: slot.image_url,
-        legal_status: slot.legal_status,
-        edition: slot.edition,
-        rarity_tier: slot.rarity_tier,
-        card: slot.card,
-      });
-    }
+  const handleDuplicateCopy = (deckCardId: string) => {
+    builder.duplicateCard(deckCardId);
   };
 
   const handleSave = async () => {
@@ -192,7 +210,11 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
 
   // Suggested tags based on the cards currently in the deck
   React.useEffect(() => {
-    const payloadCards = builder.cards.map((c) => ({ card_id: c.card.card_id, qty: c.qty }));
+    const qtyByCard = new Map<string, number>();
+    for (const c of builder.cards) {
+      qtyByCard.set(c.card.card_id, (qtyByCard.get(c.card.card_id) ?? 0) + 1);
+    }
+    const payloadCards = Array.from(qtyByCard.entries()).map(([card_id, qty]) => ({ card_id, qty }));
     if (payloadCards.length === 0) {
       setSuggestedTags([]);
       return;
@@ -236,7 +258,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
   return (
     <div className="flex h-screen flex-col">
       {/* Top bar */}
-      <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-2.5">
+      <div className="flex items-center gap-3 border-b border-border/30 bg-surface-1/80 backdrop-blur-sm px-4 py-2.5">
         <Input
           value={builder.name}
           onChange={(e) => builder.setName(e.target.value)}
@@ -449,7 +471,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
         {/* Desktop layout */}
         <div className="hidden h-full flex-1 lg:flex">
           {/* Left: Card browser */}
-          <div className="w-64 border-r border-border bg-card xl:w-72">
+          <div className="w-64 border-r border-border/30 bg-surface-1/50 xl:w-72">
             <BuilderCardBrowser
               onAddCard={builder.addCard}
               deckCardIds={deckCardIds}
@@ -471,25 +493,26 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
           </div>
 
           {/* Center: Deck editor */}
-          <div className="flex-1 border-r border-border">
+          <div className="flex-1 border-r border-border/30">
             <BuilderDeckEditor
               groupedByType={builder.groupedByType}
               totalCards={builder.totalCards}
               deckSize={deckSize}
               hasStartingGold={hasStartingGold}
               isValid={builder.validation?.is_valid ?? null}
-              onAddCard={handleDeckAddCard}
+              onAddCard={handleDuplicateCopy}
               onRemoveCard={builder.removeCard}
               onSetStartingGold={builder.setStartingGold}
+              onToggleKeyCard={builder.toggleKeyCard}
               onReplacePrinting={builder.replacePrinting}
             />
           </div>
 
           {/* Right: Validation + Stats */}
-          <div className="flex w-[40px] flex-col bg-card xl:w-[720px]">
+          <div className="flex w-[40px] flex-col bg-surface-1/30 xl:w-[720px]">
             {shouldShowValidation ? (
-              <div className="flex max-h-[240px] flex-col border-b border-border">
-                <div className="px-4 py-2.5 border-b border-border">
+              <div className="flex max-h-[240px] flex-col border-b border-border/30">
+                <div className="px-4 py-2.5 border-b border-border/30">
                   <span className="text-xs font-semibold">Validación</span>
                 </div>
                 <BuilderValidationPanel
@@ -500,7 +523,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
             ) : null}
             <div className="min-h-0 flex-1">
               <Tabs defaultValue="stats" className="flex h-full flex-col">
-                <div className="border-b border-border px-2 py-2">
+                <div className="border-b border-border/30 px-2 py-2">
                   <TabsList className="h-8 w-full">
                     <TabsTrigger value="stats" className="flex-1 text-xs">Estadísticas</TabsTrigger>
                     <TabsTrigger value="mulligan" className="flex-1 text-xs">Mulligan</TabsTrigger>
@@ -508,7 +531,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
                   </TabsList>
                 </div>
                 <TabsContent value="stats" className="min-h-0 flex-1 overflow-hidden">
-                  <BuilderStatsPanel stats={builder.validation?.computed_stats ?? null} />
+                  <BuilderStatsPanel stats={builder.validation?.computed_stats ?? null} cards={builder.cards} />
                 </TabsContent>
                 <TabsContent value="mulligan" className="min-h-0 flex-1 overflow-hidden p-3">
                   <BuilderMulliganSimulator cards={builder.cards} />
@@ -562,9 +585,10 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
                 deckSize={deckSize}
                 hasStartingGold={hasStartingGold}
                 isValid={builder.validation?.is_valid ?? null}
-                onAddCard={handleDeckAddCard}
+                onAddCard={handleDuplicateCopy}
                 onRemoveCard={builder.removeCard}
                 onSetStartingGold={builder.setStartingGold}
+                onToggleKeyCard={builder.toggleKeyCard}
                 onReplacePrinting={builder.replacePrinting}
               />
             </TabsContent>
@@ -589,7 +613,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
                       </TabsList>
                     </div>
                     <TabsContent value="stats" className="min-h-0 flex-1 overflow-hidden">
-                      <BuilderStatsPanel stats={builder.validation?.computed_stats ?? null} />
+                      <BuilderStatsPanel stats={builder.validation?.computed_stats ?? null} cards={builder.cards} />
                     </TabsContent>
                     <TabsContent value="mulligan" className="min-h-0 flex-1 overflow-auto p-3">
                       <BuilderMulliganSimulator cards={builder.cards} />

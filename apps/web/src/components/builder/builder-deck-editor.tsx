@@ -1,10 +1,29 @@
+/**
+ * File: apps/web/src/components/builder/builder-deck-editor.tsx
+ *
+ * BuilderDeckEditor — Panel central/derecho que lista el mazo agrupado por tipo
+ * y permite acciones por copia (duplicar, borrar, marcar oro inicial, cambiar impresión, marcar carta clave).
+ *
+ * Relaciones:
+ * - Consume `useDeckBuilder` (vía `BuilderWorkspace`).
+ * - Renderiza `BuilderDeckCard` para cada copia (`DeckCardSlot.deck_card_id`).
+ *
+ * Bugfixes / Notas:
+ * - Adaptado al modelo “por copia” (sin `qty` en el slot). Los totales se calculan por largo de lista.
+ * - Indicador de oro inicial usa icono de moneda (Coins).
+ *
+ * Changelog:
+ * - 2026-02-17 — Refactor: soporte por copia + acciones de key card/oro inicial.
+ */
+
 'use client';
 
+import { useMemo } from 'react';
 import type { CardPrintingData, DeckCardSlot } from '@/hooks/use-deck-builder';
 import { BuilderDeckCard } from './builder-deck-card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Layers, Star, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Layers, Coins, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface CardGrouping {
@@ -21,10 +40,11 @@ interface BuilderDeckEditorProps {
   deckSize: number;
   hasStartingGold: boolean;
   isValid: boolean | null;
-  onAddCard: (printingId: string) => void;
-  onRemoveCard: (printingId: string) => void;
-  onSetStartingGold: (printingId: string) => void;
-  onReplacePrinting: (fromPrintingId: string, toPrinting: CardPrintingData) => void;
+  onAddCard: (deckCardId: string) => void;
+  onRemoveCard: (deckCardId: string) => void;
+  onSetStartingGold: (deckCardId: string) => void;
+  onReplacePrinting: (deckCardId: string, toPrinting: CardPrintingData) => void;
+  onToggleKeyCard: (cardId: string) => void;
 }
 
 export function BuilderDeckEditor({
@@ -37,7 +57,18 @@ export function BuilderDeckEditor({
   onRemoveCard,
   onSetStartingGold,
   onReplacePrinting,
+  onToggleKeyCard,
 }: BuilderDeckEditorProps) {
+  const copiesByCardId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const group of groupedByType) {
+      for (const c of group.cards) {
+        map.set(c.card.card_id, (map.get(c.card.card_id) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [groupedByType]);
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -60,15 +91,15 @@ export function BuilderDeckEditor({
           </Badge>
 
           {/* Starting gold indicator */}
-          <div
-            className={cn(
-              'flex items-center gap-1 text-xs',
-              hasStartingGold ? 'text-amber-500' : 'text-muted-foreground',
-            )}
-            title={hasStartingGold ? 'Oro inicial seleccionado' : 'Falta oro inicial'}
-          >
-            <Star className={cn('h-3.5 w-3.5', hasStartingGold && 'fill-amber-500')} />
-          </div>
+           <div
+             className={cn(
+               'flex items-center gap-1 text-xs',
+               hasStartingGold ? 'text-amber-500' : 'text-muted-foreground',
+             )}
+             title={hasStartingGold ? 'Oro inicial seleccionado' : 'Falta oro inicial'}
+           >
+            <Coins className={cn('h-3.5 w-3.5', hasStartingGold && 'text-amber-500')} />
+           </div>
 
           {/* Validation status */}
           {isValid !== null && (
@@ -111,12 +142,14 @@ export function BuilderDeckEditor({
                 <div className="space-y-1">
                   {group.cards.map((slot) => (
                     <BuilderDeckCard
-                      key={slot.card_printing_id}
+                      key={slot.deck_card_id}
                       slot={slot}
-                      onAdd={() => onAddCard(slot.card_printing_id)}
-                      onRemove={() => onRemoveCard(slot.card_printing_id)}
-                      onSetStartingGold={() => onSetStartingGold(slot.card_printing_id)}
-                      onReplacePrinting={(toPrinting) => onReplacePrinting(slot.card_printing_id, toPrinting)}
+                      copiesOfCard={copiesByCardId.get(slot.card.card_id) ?? 1}
+                      onAdd={() => onAddCard(slot.deck_card_id)}
+                      onRemove={() => onRemoveCard(slot.deck_card_id)}
+                      onSetStartingGold={() => onSetStartingGold(slot.deck_card_id)}
+                      onToggleKeyCard={() => onToggleKeyCard(slot.card.card_id)}
+                      onReplacePrinting={(toPrinting) => onReplacePrinting(slot.deck_card_id, toPrinting)}
                     />
                   ))}
                 </div>

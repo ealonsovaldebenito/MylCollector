@@ -12,27 +12,38 @@ import {
 } from '@myl/shared';
 import { AppError } from '../api/errors';
 
+const CONDITION_CODES = [
+  'PERFECTA',
+  'CASI PERFECTA',
+  'EXCELENTE',
+  'BUENA',
+  'POCO USO',
+  'JUGADA',
+  'MALAS CONDICIONES',
+] as const;
+const CONDITION_ALIASES: Record<string, (typeof CONDITION_CODES)[number]> = {
+  MINT: 'PERFECTA',
+  NEAR_MINT: 'CASI PERFECTA',
+  EXCELLENT: 'EXCELENTE',
+  GOOD: 'BUENA',
+  LIGHT_PLAYED: 'POCO USO',
+  PLAYED: 'JUGADA',
+  POOR: 'MALAS CONDICIONES',
+};
+
 /**
  * Get user's collection with filters and pagination
  */
 export async function getUserCollection(
   supabase: Client,
   userId: string,
-  filters: CollectionFilters,
+  filters: CollectionFilters & { collection_id?: string | null },
 ) {
   let query = supabase
     .from('user_cards')
     .select(
       `
-      user_card_id,
-      user_id,
-      card_printing_id,
-      qty,
-      condition,
-      notes,
-      acquired_at,
-      created_at,
-      updated_at,
+      *,
       card_printing:card_printings!inner(
         card_printing_id,
         image_url,
@@ -50,6 +61,15 @@ export async function getUserCollection(
     `,
     )
     .eq('user_id', userId);
+
+  // Collection folder filter — only apply if collection_id column exists
+  // When collection_id filter is undefined, show all cards (no filter applied)
+  if (filters.collection_id === null) {
+    // "General" folder = cards without a collection
+    query = query.is('collection_id' as string, null);
+  } else if (filters.collection_id) {
+    query = query.eq('collection_id' as string, filters.collection_id);
+  }
 
   // Apply filters
   if (filters.q) {
@@ -80,25 +100,33 @@ export async function getUserCollection(
     query = query.eq('condition', filters.condition);
   }
 
+  // Legal status filter (on card_printings)
+  if ((filters as Record<string, unknown>).legal_status) {
+    query = query.eq('card_printing.legal_status', (filters as Record<string, unknown>).legal_status);
+  }
+
   if (filters.min_qty) {
     query = query.gte('qty', filters.min_qty);
   }
 
   // Sorting
-  const sortMap = {
-    name_asc: { column: 'card_printing.card.name', ascending: true },
-    name_desc: { column: 'card_printing.card.name', ascending: false },
+  // Supabase PostgREST only supports ordering by direct columns, not nested relations.
+  // For nested ordering, sort client-side after fetching.
+  const directSortMap: Record<string, { column: string; ascending: boolean }> = {
     qty_asc: { column: 'qty', ascending: true },
     qty_desc: { column: 'qty', ascending: false },
     acquired_asc: { column: 'acquired_at', ascending: true },
     acquired_desc: { column: 'acquired_at', ascending: false },
-    cost_asc: { column: 'card_printing.card.cost', ascending: true },
-    cost_desc: { column: 'card_printing.card.cost', ascending: false },
+    price_asc: { column: 'user_price', ascending: true },
+    price_desc: { column: 'user_price', ascending: false },
   };
 
-  const sort = sortMap[filters.sort || 'name_asc'];
-  if (sort) {
-    query = query.order(sort.column, { ascending: sort.ascending });
+  const directSort = directSortMap[filters.sort || ''];
+  if (directSort) {
+    query = query.order(directSort.column, { ascending: directSort.ascending });
+  } else {
+    // Default: order by created_at desc (most recent first)
+    query = query.order('created_at', { ascending: false });
   }
 
   // Pagination
@@ -112,56 +140,108 @@ export async function getUserCollection(
 
   const { data, error } = await query;
 
-  if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar colección', { error });
+  if (error) {
+    console.error('[getUserCollection] Supabase error:', JSON.stringify(error));
+    throw new AppError('INTERNAL_ERROR', `Error al cargar colección: ${error.message}`, { error });
+  }
 
-  return (data ?? []) as unknown as UserCardWithRelations[];
+  const rows = (data ?? []) as unknown as (UserCardWithRelations & { card_printing_id: string })[];
+
+  // Batch-fetch store min prices for all printings
+  const printingIds = rows.map((r) => r.card_printing?.card_printing_id ?? (r as Record<string, unknown>).card_printing_id as string).filter(Boolean);
+  const priceMap = new Map<string, number>();
+
+  if (printingIds.length > 0) {
+    const { data: storePrices } = await supabase
+      .from('store_printing_links')
+      .select('card_printing_id, last_price')
+      .in('card_printing_id', printingIds)
+      .eq('is_active', true)
+      .not('last_price', 'is', null);
+
+    if (storePrices) {
+      for (const sp of storePrices) {
+        const pid = sp.card_printing_id as string;
+        const price = sp.last_price as number;
+        const current = priceMap.get(pid);
+        if (current === undefined || price < current) {
+          priceMap.set(pid, price);
+        }
+      }
+    }
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    store_min_price: priceMap.get(row.card_printing?.card_printing_id ?? '') ?? null,
+  })) as unknown as UserCardWithRelations[];
 }
 
 /**
- * Add card to collection (or update qty if exists)
+ * Add card to collection.
+ * Only merges (increments qty) if same printing+condition+collection AND no custom price.
+ * Otherwise creates a new row — user can have multiple copies with different prices.
  */
 export async function addToCollection(
   supabase: Client,
   userId: string,
   input: AddToCollection,
 ) {
-  // Check if card already exists in collection
-  const { data: existing } = await supabase
-    .from('user_cards')
-    .select('user_card_id, qty')
-    .eq('user_id', userId)
-    .eq('card_printing_id', input.card_printing_id)
-    .eq('condition', input.condition)
-    .single();
+  // Determine target collection_id (null = General)
+  const targetCollectionId = input.collection_id ?? null;
 
-  if (existing) {
-    // Update existing entry
-    const { data, error } = await supabase
+  // Only merge if no custom price is set (user wants uniform copies)
+  if (!input.user_price) {
+    const { data: existingRows } = await supabase
       .from('user_cards')
-      .update({ qty: existing.qty + input.qty })
-      .eq('user_card_id', existing.user_card_id)
-      .select()
-      .single();
+      .select('user_card_id, qty')
+      .eq('user_id', userId)
+      .eq('card_printing_id', input.card_printing_id)
+      .eq('condition', input.condition)
+      .is('user_price', null)
+      .limit(1);
 
-    if (error) throw new AppError('INTERNAL_ERROR', 'Error al actualizar colección');
-    return data;
+    const existing = existingRows?.[0];
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from('user_cards')
+        .update({ qty: existing.qty + input.qty })
+        .eq('user_card_id', existing.user_card_id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[addToCollection] Supabase update error:', JSON.stringify(error));
+        throw new AppError('INTERNAL_ERROR', `Error al actualizar colección: ${error.message}`);
+      }
+      return data;
+    }
   }
 
-  // Insert new entry
+  // Insert new entry — always in target collection
+  const insertPayload: Record<string, unknown> = {
+    user_id: userId,
+    card_printing_id: input.card_printing_id,
+    qty: input.qty,
+    condition: input.condition,
+    notes: input.notes || null,
+    collection_id: targetCollectionId,
+  };
+  if (input.user_price != null) insertPayload.user_price = input.user_price;
+  if (input.is_for_sale) insertPayload.is_for_sale = true;
+  if (input.acquired_at) insertPayload.acquired_at = input.acquired_at;
+
   const { data, error } = await supabase
     .from('user_cards')
-    .insert({
-      user_id: userId,
-      card_printing_id: input.card_printing_id,
-      qty: input.qty,
-      condition: input.condition,
-      notes: input.notes || null,
-      acquired_at: input.acquired_at || new Date().toISOString(),
-    })
+    .insert(insertPayload)
     .select()
     .single();
 
-  if (error) throw new AppError('INTERNAL_ERROR', 'Error al agregar a colección');
+  if (error) {
+    console.error('[addToCollection] Supabase insert error:', JSON.stringify(error));
+    throw new AppError('INTERNAL_ERROR', `Error al agregar a colección: ${error.message}`);
+  }
   return data;
 }
 
@@ -255,14 +335,58 @@ export async function getCollectionStats(
   supabase: Client,
   userId: string,
 ): Promise<CollectionStats> {
-  // Total cards and printings
-  const { data: totals } = await supabase
+  // Total cards, printings y precios
+  const { data: totals, error: totalsError } = await supabase
     .from('user_cards')
-    .select('qty, card_printing_id')
+    .select('qty, card_printing_id, user_price, condition')
     .eq('user_id', userId);
 
-  const totalCards = totals?.reduce((sum, item) => sum + item.qty, 0) || 0;
+  if (totalsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al calcular totales de colecciÃ³n', { error: totalsError });
+  }
+
+  const totalCards = totals?.reduce((sum, item) => sum + (item.qty ?? 0), 0) || 0;
   const totalPrintings = totals?.length || 0;
+
+  // Precios de tienda (mÃ­nimo por impresiÃ³n)
+  const priceMap = new Map<string, number>();
+  if (totals && totals.length > 0) {
+    const printingIds = totals.map((t) => t.card_printing_id).filter(Boolean);
+    if (printingIds.length > 0) {
+      const { data: storePrices } = await supabase
+        .from('store_printing_links')
+        .select('card_printing_id, last_price')
+        .in('card_printing_id', printingIds)
+        .eq('is_active', true)
+        .not('last_price', 'is', null);
+
+      if (storePrices) {
+        for (const sp of storePrices) {
+          const pid = sp.card_printing_id as string;
+          const price = sp.last_price as number;
+          const current = priceMap.get(pid);
+          if (current === undefined || price < current) {
+            priceMap.set(pid, price);
+          }
+        }
+      }
+    }
+  }
+
+  let totalUserValue = 0;
+  let totalStoreValue = 0;
+  if (totals) {
+    for (const row of totals) {
+      const qty = row.qty ?? 0;
+      if (row.user_price != null) {
+        totalUserValue += row.user_price * qty;
+      }
+      const storePrice = priceMap.get(row.card_printing_id);
+      if (storePrice != null) {
+        totalStoreValue += storePrice * qty;
+      }
+    }
+  }
 
   // Unique cards (by card_id)
   const { count: uniqueCount } = await supabase
@@ -328,19 +452,16 @@ export async function getCollectionStats(
   }
 
   // By condition
-  const { data: byConditionData } = await supabase
-    .from('user_cards')
-    .select('qty, condition')
-    .eq('user_id', userId);
-
   const byCondition: CollectionStats['by_condition'] = {};
-  if (byConditionData) {
-    for (const item of byConditionData) {
-      const condition = item.condition as keyof CollectionStats['by_condition'];
-      if (!byCondition[condition]) {
-        byCondition[condition] = 0;
-      }
-      byCondition[condition] = (byCondition[condition] ?? 0) + item.qty;
+  for (const code of CONDITION_CODES) {
+    byCondition[code] = 0;
+  }
+  if (totals) {
+    for (const item of totals) {
+      const normalized = CONDITION_ALIASES[item.condition] ?? item.condition;
+      const condition = normalized as keyof CollectionStats['by_condition'];
+      if (byCondition[condition] == null) byCondition[condition] = 0;
+      byCondition[condition] = (byCondition[condition] ?? 0) + (item.qty ?? 0);
     }
   }
 
@@ -348,6 +469,8 @@ export async function getCollectionStats(
     total_cards: totalCards,
     total_printings: totalPrintings,
     total_unique_cards: uniqueCount || 0,
+    total_user_value: Math.round(totalUserValue * 100) / 100,
+    total_store_value: Math.round(totalStoreValue * 100) / 100,
     by_block: byBlock,
     by_rarity: byRarity,
     by_condition: byCondition,

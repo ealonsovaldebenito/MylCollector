@@ -17,7 +17,7 @@
 | Architecture (02) | Completo | 2026-02-04 |
 | Auth / Supabase | Scaffold listo | 2026-02-03 |
 | Backend API | ✅ Catalogos + Cartas + Mazos + Validacion + Tiendas/Scraping | 2026-02-16 |
-| Frontend UI | ✅ Catalogo + Builder + Admin Tiendas + Precios en catalogo + Admin Cartas (tabs + links tiendas) | 2026-02-17 |
+| Frontend UI | ✅ Catalogo (detalle embebido con sidebar reimpresiones + similares + stats mazos) + Builder + Admin Tiendas + Precios en catalogo + Admin Cartas (tabs + links tiendas) | 2026-02-17 |
 | Tiendas / Scraping | ✅ Implementado (schemas, servicios, API, UI admin, precios en catalogo) | 2026-02-16 |
 | Banlists / Historial | ✅ SQL + Schemas + Servicios + API + Admin UI | 2026-02-16 |
 | Oracles / Strategy | ✅ SQL + Schemas + Servicios + API | 2026-02-16 |
@@ -223,6 +223,7 @@ Completar `04_DECK_VALIDATION_ENGINE.md` e implementar el motor de validacion.
 ### Hitos completados
 - [x] Catalogo de cartas con filtros avanzados (busqueda, bloque, edicion, tipo, raza, coste, rareza, tags)
 - [x] Pagina detalle de carta completa (breadcrumb, hero, tabs: Reimpresiones/Legalidad/Precios/Stats, cartas similares)
+- [x] Detalle embebido en `/catalog?card=` (reimpresiones en sidebar derecho + "similares" + stats de mazos/co-ocurrencia)
 - [x] Constructor de mazos con layout 3 columnas (desktop) / tabs (mobile)
   - Columna izq: Buscador de cartas con filtros
   - Columna centro: Editor de mazo agrupado por tipo, qty controls, oro inicial

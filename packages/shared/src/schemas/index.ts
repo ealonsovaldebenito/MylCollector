@@ -27,6 +27,7 @@ export {
   raceSchema,
   rarityTierSchema,
   tagSchema,
+  cardConditionRefSchema,
   type Block,
   type Edition,
   type EditionWithBlock,
@@ -34,6 +35,7 @@ export {
   type Race,
   type RarityTier,
   type Tag,
+  type CardConditionRef,
 } from './catalog.js';
 
 // Cards
@@ -238,6 +240,27 @@ export {
   type DeckStrategyCardRef,
 } from './oracle.js';
 
+// Community
+export {
+  createCommentSchema,
+  updateCommentSchema,
+  publicDeckSortSchema,
+  publicDeckFiltersSchema,
+  publicDeckListItemSchema,
+  deckCommentSchema,
+  userPublicProfileSchema,
+  trendingDecksResponseSchema,
+  type CreateComment,
+  type UpdateComment,
+  type PublicDeckSort,
+  type PublicDeckFilters,
+  type PublicDeckListItem,
+  type DeckComment,
+  type UserPublicProfile,
+  type TrendingDecksResponse,
+  type TopBuilder,
+} from './community.js';
+
 // Collection
 export {
   cardConditionSchema,
@@ -266,4 +289,12 @@ export {
   type CollectionFilters,
   type CollectionCsvLine,
   type CollectionImportResult,
+  userCollectionSchema,
+  createCollectionSchema,
+  updateCollectionSchema,
+  moveCardsSchema,
+  type UserCollection,
+  type CreateCollection,
+  type UpdateCollection,
+  type MoveCards,
 } from './collection.js';

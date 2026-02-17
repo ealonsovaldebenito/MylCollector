@@ -1,21 +1,34 @@
+/**
+ * File: apps/web/src/components/builder/builder-deck-card.tsx
+ *
+ * BuilderDeckCard — Fila compacta para una copia específica dentro del mazo.
+ * Permite cambiar impresión, duplicar/eliminar copia, marcar oro inicial y carta clave.
+ *
+ * Changelog:
+ * - 2026-02-19 — Fix: diálogo de impresiones estable, tooltip de coste, caché de impresiones.
+ */
+
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DeckCardSlot } from '@/hooks/use-deck-builder';
 import { editionDisplayName } from '@myl/shared';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CardImage } from '@/components/catalog/card-image';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Layers, Plus, Minus, Star } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Layers, Plus, Minus, Coins, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BuilderDeckCardProps {
   slot: DeckCardSlot;
+  copiesOfCard: number;
   onAdd: () => void;
   onRemove: () => void;
   onSetStartingGold: () => void;
+  onToggleKeyCard: () => void;
   onReplacePrinting: (toPrinting: {
     card_printing_id: string;
     image_url: string | null;
@@ -44,7 +57,15 @@ interface ApiCardPrintingRow {
   rarity_tier: { name: string; code: string } | null;
 }
 
-export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onReplacePrinting }: BuilderDeckCardProps) {
+export function BuilderDeckCard({
+  slot,
+  copiesOfCard,
+  onAdd,
+  onRemove,
+  onSetStartingGold,
+  onToggleKeyCard,
+  onReplacePrinting,
+}: BuilderDeckCardProps) {
   const canBeGold = slot.card.card_type.code === 'ORO' && !slot.card.has_ability && slot.card.can_be_starting_gold;
   const maxQty = slot.card.is_unique ? 1 : 3;
 
@@ -52,6 +73,7 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
   const [printingOptions, setPrintingOptions] = useState<PrintingOption[]>([]);
   const [isLoadingPrintings, setIsLoadingPrintings] = useState(false);
   const [printingsError, setPrintingsError] = useState<string | null>(null);
+  const printingsCacheRef = useRef<Map<string, PrintingOption[]>>(new Map());
 
   const currentPrintingId = slot.card_printing_id;
 
@@ -69,13 +91,29 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
 
   useEffect(() => {
     if (!isPrintingDialogOpen) return;
+    if (!slot.card.card_id) {
+      setPrintingsError('Carta sin id');
+      return;
+    }
+    const cached = printingsCacheRef.current.get(slot.card.card_id);
+    if (cached && cached.length > 0) {
+      setPrintingOptions(cached);
+      return;
+    }
     if (printingOptions.length > 0 || isLoadingPrintings) return;
 
     let mounted = true;
     setIsLoadingPrintings(true);
     setPrintingsError(null);
-    fetch(`/api/v1/cards/${slot.card.card_id}/printings`)
-      .then((r) => r.json())
+
+    fetch(`/api/v1/cards/${slot.card.card_id}/printings`, { cache: 'no-store' })
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text().catch(() => '');
+          throw new Error(`HTTP ${r.status}: ${text || r.statusText}`);
+        }
+        return r.json();
+      })
       .then((json) => {
         if (!mounted) return;
         if (!json.ok) {
@@ -83,20 +121,21 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
           return;
         }
         const rows = (json.data ?? []) as ApiCardPrintingRow[];
-        setPrintingOptions(
-          rows.map((p) => ({
-            card_printing_id: p.card_printing_id,
-            image_url: p.image_url ?? null,
-            legal_status: p.legal_status,
-            printing_variant: p.printing_variant,
-            edition: p.edition,
-            rarity_tier: p.rarity_tier ? { name: p.rarity_tier.name, code: p.rarity_tier.code } : null,
-          })),
-        );
+        const mapped = rows.map((p) => ({
+          card_printing_id: p.card_printing_id,
+          image_url: p.image_url ?? null,
+          legal_status: p.legal_status,
+          printing_variant: p.printing_variant,
+          edition: p.edition,
+          rarity_tier: p.rarity_tier ? { name: p.rarity_tier.name, code: p.rarity_tier.code } : null,
+        }));
+        printingsCacheRef.current.set(slot.card.card_id, mapped);
+        setPrintingOptions(mapped);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!mounted) return;
-        setPrintingsError('Error de conexión');
+        console.error('printings fetch error', err);
+        setPrintingsError(err?.message ?? 'Error de conexión');
       })
       .finally(() => {
         if (!mounted) return;
@@ -117,11 +156,7 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
     >
       {/* Mini image */}
       <div className="h-10 w-7 flex-shrink-0 overflow-hidden rounded-sm">
-        <CardImage
-          src={slot.image_url}
-          alt={slot.card.name}
-          className="h-full w-full object-cover"
-        />
+        <CardImage src={slot.image_url} alt={slot.card.name} className="h-full w-full object-cover" />
       </div>
 
       {/* Info */}
@@ -129,7 +164,10 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
         <div className="flex items-center gap-1">
           <span className="truncate text-xs font-medium">{slot.card.name}</span>
           {slot.is_starting_gold && (
-            <Star className="h-3 w-3 flex-shrink-0 fill-amber-500 text-amber-500" />
+            <Coins className="h-3.5 w-3.5 flex-shrink-0 fill-amber-500 text-amber-500" />
+          )}
+          {slot.is_key_card && (
+            <Star className="h-3.5 w-3.5 flex-shrink-0 fill-yellow-500 text-yellow-500" />
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -140,14 +178,26 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
             type="button"
             variant="ghost"
             size="icon"
-            className="h-5 w-5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+            className="h-5 w-5 text-muted-foreground hover:text-foreground"
             onClick={() => setIsPrintingDialogOpen(true)}
             title="Cambiar impresión"
           >
             <Layers className="h-3.5 w-3.5" />
           </Button>
           {slot.card.cost !== null && (
-            <span className="text-[10px] text-muted-foreground">C:{slot.card.cost}</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="secondary" className="h-4 px-1 gap-1 text-[10px] cursor-help">
+                    <Coins className="h-3 w-3 text-amber-500" />
+                    {slot.card.cost}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center">
+                  Coste de Oro
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       </div>
@@ -167,9 +217,26 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
           onClick={onSetStartingGold}
           title="Marcar como oro inicial"
         >
-          <Star className="h-3 w-3" />
+          <Coins className="h-3.5 w-3.5" />
         </Button>
       )}
+
+      {/* Key card toggle */}
+      <Button
+        type="button"
+        variant={slot.is_key_card ? 'default' : 'ghost'}
+        size="icon"
+        className={cn(
+          'h-6 w-6 flex-shrink-0',
+          slot.is_key_card
+            ? 'bg-yellow-500 text-white hover:bg-yellow-600'
+            : 'text-muted-foreground opacity-0 group-hover:opacity-100',
+        )}
+        onClick={onToggleKeyCard}
+        title="Marcar como carta clave"
+      >
+        <Star className="h-3.5 w-3.5" />
+      </Button>
 
       {/* Qty controls */}
       <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -182,14 +249,14 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
         >
           <Minus className="h-3 w-3" />
         </Button>
-        <span className="w-5 text-center text-xs font-mono font-bold">{slot.qty}</span>
+        <span className="w-5 text-center text-xs font-mono font-bold">1</span>
         <Button
           type="button"
           variant="ghost"
           size="icon"
           className="h-6 w-6"
           onClick={onAdd}
-          disabled={slot.qty >= maxQty}
+          disabled={copiesOfCard >= maxQty}
         >
           <Plus className="h-3 w-3" />
         </Button>
@@ -199,65 +266,86 @@ export function BuilderDeckCard({ slot, onAdd, onRemove, onSetStartingGold, onRe
         <DialogContent className="max-w-lg p-0">
           <DialogHeader className="border-b border-border p-4">
             <DialogTitle className="text-base">Seleccionar impresión</DialogTitle>
+            <DialogDescription className="sr-only">
+              Elige una impresión alternativa de la misma carta.
+            </DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[70vh]">
             <div className="space-y-2 p-4">
               {printingsError ? (
-                <p className="text-sm text-destructive">{printingsError}</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-destructive">{printingsError}</p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setPrintingOptions([]);
+                      setPrintingsError(null);
+                      setIsLoadingPrintings(false);
+                    }}
+                  >
+                    Reintentar
+                  </Button>
+                </div>
               ) : isLoadingPrintings ? (
                 <p className="text-sm text-muted-foreground">Cargando impresiones…</p>
               ) : optionsByEdition.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No hay impresiones disponibles.</p>
               ) : (
-                optionsByEdition.map((p) => {
-                  const active = p.card_printing_id === currentPrintingId;
-                  return (
-                    <button
-                      key={p.card_printing_id}
-                      type="button"
-                      className={cn(
-                        'flex w-full items-center gap-3 rounded-md border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:bg-muted/40',
-                        active && 'border-primary bg-primary/5',
-                      )}
-                      onClick={() => {
-                        onReplacePrinting({
-                          card_printing_id: p.card_printing_id,
-                          image_url: p.image_url ?? null,
-                          legal_status: p.legal_status,
-                          edition: p.edition,
-                          rarity_tier: p.rarity_tier,
-                          card: slot.card,
-                        });
-                        setIsPrintingDialogOpen(false);
-                      }}
-                    >
-                      <div className="h-14 w-10 flex-shrink-0 overflow-hidden rounded-sm border border-border bg-muted/20">
-                        <CardImage src={p.image_url} alt={slot.card.name} className="h-full w-full" fit="contain" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={active ? 'default' : 'secondary'} className="h-5 text-[10px]">
-                            {editionDisplayName(p.edition.name)}
-                          </Badge>
-                          {p.rarity_tier ? (
-                            <Badge variant="outline" className="h-5 text-[10px]">
-                              {p.rarity_tier.name}
+                <div className="space-y-2">
+                  <div className="text-xs text-muted-foreground">
+                    Impresiones encontradas: {optionsByEdition.length}
+                  </div>
+                  {optionsByEdition.map((p) => {
+                    const active = p.card_printing_id === currentPrintingId;
+                    return (
+                      <button
+                        key={p.card_printing_id}
+                        type="button"
+                        className={cn(
+                          'flex w-full items-center gap-3 rounded-md border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:bg-muted/40',
+                          active && 'border-primary bg-primary/5',
+                        )}
+                        onClick={() => {
+                          onReplacePrinting({
+                            card_printing_id: p.card_printing_id,
+                            image_url: p.image_url ?? null,
+                            legal_status: p.legal_status,
+                            edition: p.edition,
+                            rarity_tier: p.rarity_tier,
+                            card: slot.card,
+                          });
+                          setIsPrintingDialogOpen(false);
+                        }}
+                      >
+                        <div className="h-14 w-10 flex-shrink-0 overflow-hidden rounded-sm border border-border bg-muted/20">
+                          <CardImage src={p.image_url} alt={slot.card.name} className="h-full w-full" fit="contain" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={active ? 'default' : 'secondary'} className="h-5 text-[10px]">
+                              {editionDisplayName(p.edition.name)}
                             </Badge>
-                          ) : null}
-                          <Badge variant="outline" className="h-5 text-[10px]">
-                            {p.legal_status}
-                          </Badge>
+                            {p.rarity_tier ? (
+                              <Badge variant="outline" className="h-5 text-[10px]">
+                                {p.rarity_tier.name}
+                              </Badge>
+                            ) : null}
+                            <Badge variant="outline" className="h-5 text-[10px]">
+                              {p.legal_status}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            Variante: <span className="font-mono">{p.printing_variant}</span>
+                          </div>
                         </div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">
-                          Variante: <span className="font-mono">{p.printing_variant}</span>
-                        </div>
-                      </div>
-                      {active ? (
-                        <Badge className="h-5 flex-shrink-0 text-[10px]">Actual</Badge>
-                      ) : null}
-                    </button>
-                  );
-                })
+                        {active ? (
+                          <Badge className="h-5 flex-shrink-0 text-[10px]">Actual</Badge>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </ScrollArea>

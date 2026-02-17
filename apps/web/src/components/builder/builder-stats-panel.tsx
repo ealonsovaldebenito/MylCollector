@@ -1,13 +1,33 @@
+/**
+ * File: apps/web/src/components/builder/builder-stats-panel.tsx
+ *
+ * BuilderStatsPanel — Resumen visual de estadísticas del mazo.
+ *
+ * Relaciones:
+ * - Fuente principal: `validation.computed_stats` (backend) desde `/api/v1/validate`.
+ * - Complementa con data del cliente: `DeckCardSlot[]` para mostrar cartas clave.
+ *
+ * Bugfixes / Notas:
+ * - Remueve “Oro promedio” (redundante con coste promedio).
+ * - Agrega sección de “Cartas clave” (marcadas con estrella en el editor).
+ *
+ * Changelog:
+ * - 2026-02-17 — UX: cartas clave + elimina oro promedio.
+ */
+
 'use client';
 
+import { useMemo } from 'react';
 import type { DeckComputedStats } from '@myl/shared';
+import type { DeckCardSlot } from '@/hooks/use-deck-builder';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BarChart3, Coins, PieChart, Sigma } from 'lucide-react';
+import { BarChart3, PieChart, Sigma, Star } from 'lucide-react';
 
 interface BuilderStatsPanelProps {
   stats: DeckComputedStats | null;
+  cards?: DeckCardSlot[];
 }
 
 function sortedNumericHistogramEntries(hist: Record<string, number>): Array<[string, number]> {
@@ -18,28 +38,36 @@ function sortedNumericHistogramEntries(hist: Record<string, number>): Array<[str
   });
 }
 
-export function BuilderStatsPanel({ stats }: BuilderStatsPanelProps) {
+export function BuilderStatsPanel({ stats, cards }: BuilderStatsPanelProps) {
   const hasStats = !!stats && stats.total_cards > 0;
 
+  const keyCards = useMemo(() => {
+    if (!cards || cards.length === 0) return [];
+    const map = new Map<string, { name: string; cost: number | null; qty: number }>();
+    for (const c of cards) {
+      if (!c.is_key_card) continue;
+      const k = c.card.card_id;
+      const existing = map.get(k);
+      if (existing) existing.qty += 1;
+      else map.set(k, { name: c.card.name, cost: c.card.cost ?? null, qty: 1 });
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const ca = a.cost ?? 999;
+      const cb = b.cost ?? 999;
+      if (ca !== cb) return ca - cb;
+      return a.name.localeCompare(b.name, 'es');
+    });
+  }, [cards]);
+
   const costEntries = hasStats ? sortedNumericHistogramEntries(stats.cost_histogram ?? {}) : [];
-  const goldEntries = hasStats && stats.gold_histogram ? sortedNumericHistogramEntries(stats.gold_histogram) : [];
-
   const maxCostQty = hasStats ? Math.max(...Object.values(stats.cost_histogram ?? {}), 1) : 1;
-  const maxGoldQty = hasStats && stats.gold_histogram ? Math.max(...Object.values(stats.gold_histogram), 1) : 1;
 
-  const typeEntries = hasStats
-    ? Object.entries(stats.type_distribution ?? {}).sort(([, a], [, b]) => b - a)
-    : [];
-  const raceEntries = hasStats
-    ? Object.entries(stats.race_distribution ?? {}).sort(([, a], [, b]) => b - a)
-    : [];
-  const rarityEntries = hasStats
-    ? Object.entries(stats.rarity_distribution ?? {}).sort(([, a], [, b]) => b - a)
-    : [];
+  const typeEntries = hasStats ? Object.entries(stats.type_distribution ?? {}).sort(([, a], [, b]) => b - a) : [];
+  const raceEntries = hasStats ? Object.entries(stats.race_distribution ?? {}).sort(([, a], [, b]) => b - a) : [];
+  const rarityEntries = hasStats ? Object.entries(stats.rarity_distribution ?? {}).sort(([, a], [, b]) => b - a) : [];
 
-  const avgCostByTypeEntries = hasStats && stats.avg_cost_by_type
-    ? Object.entries(stats.avg_cost_by_type).sort(([, a], [, b]) => b.qty - a.qty)
-    : [];
+  const avgCostByTypeEntries =
+    hasStats && stats.avg_cost_by_type ? Object.entries(stats.avg_cost_by_type).sort(([, a], [, b]) => b.qty - a.qty) : [];
 
   return (
     <ScrollArea className="h-full">
@@ -52,7 +80,7 @@ export function BuilderStatsPanel({ stats }: BuilderStatsPanelProps) {
         ) : null}
 
         {hasStats ? (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Card className="bg-gradient-to-br from-muted/20 to-background">
               <CardHeader className="p-4 pb-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
@@ -78,20 +106,33 @@ export function BuilderStatsPanel({ stats }: BuilderStatsPanelProps) {
                 <div className="mt-1 text-[11px] text-muted-foreground">Sin contar Oro</div>
               </CardContent>
             </Card>
-
-            <Card className="bg-gradient-to-br from-amber-500/10 to-background">
-              <CardHeader className="p-4 pb-2">
-                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                  <Coins className="h-3.5 w-3.5" />
-                  Oro promedio
-                </div>
-              </CardHeader>
-              <CardContent className="p-4 pt-0">
-                <div className="text-2xl font-semibold">{stats.avg_gold_value ?? '—'}</div>
-                <div className="mt-1 text-[11px] text-muted-foreground">Valor de Oro (si aplica)</div>
-              </CardContent>
-            </Card>
           </div>
+        ) : null}
+
+        {keyCards.length > 0 ? (
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <div className="flex items-center gap-1.5">
+                <Star className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold">Cartas clave</span>
+                <Badge variant="secondary" className="ml-auto h-5 text-[10px]">
+                  {keyCards.reduce((s, k) => s + k.qty, 0)}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 pt-2">
+              <div className="flex flex-wrap gap-1.5">
+                {keyCards.map((k) => (
+                  <Badge key={k.name} variant="outline" className="h-6 gap-1.5 text-[11px]">
+                    <Star className="h-3.5 w-3.5 fill-yellow-500 text-yellow-500" />
+                    <span className="max-w-[240px] truncate">{k.name}</span>
+                    <span className="font-mono text-muted-foreground">x{k.qty}</span>
+                    {k.cost !== null ? <span className="font-mono text-muted-foreground">· C:{k.cost}</span> : null}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         ) : null}
 
         {hasStats ? (
@@ -114,9 +155,7 @@ export function BuilderStatsPanel({ stats }: BuilderStatsPanelProps) {
                     const percentage = (qty / maxCostQty) * 100;
                     return (
                       <div key={cost} className="flex items-center gap-2">
-                        <span className="w-8 text-[11px] font-mono text-muted-foreground">
-                          {cost === 'N/A' ? '—' : cost}
-                        </span>
+                        <span className="w-8 text-[11px] font-mono text-muted-foreground">{cost === 'N/A' ? '—' : cost}</span>
                         <div className="relative h-4 flex-1 overflow-hidden rounded-md bg-muted">
                           <div className="h-full bg-primary/70 transition-all" style={{ width: `${percentage}%` }} />
                         </div>
@@ -129,7 +168,6 @@ export function BuilderStatsPanel({ stats }: BuilderStatsPanelProps) {
             </CardContent>
           </Card>
         ) : null}
-
 
         {hasStats ? (
           <Card>
@@ -231,3 +269,4 @@ export function BuilderStatsPanel({ stats }: BuilderStatsPanelProps) {
     </ScrollArea>
   );
 }
+

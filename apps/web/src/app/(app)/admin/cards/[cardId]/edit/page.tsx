@@ -5,16 +5,20 @@
  * Changelog:
  *   2026-02-16 — Creación inicial
  *   2026-02-17 — Mejorar skeleton de carga con layout realista
+ *   2026-02-17 — Botón rápido "Ver en Catálogo"
  */
 
 'use client';
 
 import { use } from 'react';
+import Link from 'next/link';
 import { useCatalogData } from '@/hooks/use-catalog-data';
 import { useCardDetail } from '@/hooks/use-card-detail';
 import { CardForm } from '@/components/admin/card-form';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/feedback';
+import { Button } from '@/components/ui/button';
+import { ExternalLink } from 'lucide-react';
 
 export default function EditCardPage({ params }: { params: Promise<{ cardId: string }> }) {
   const { cardId } = use(params);
@@ -63,8 +67,14 @@ export default function EditCardPage({ params }: { params: Promise<{ cardId: str
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-3xl font-bold">Editar: {card.name}</h1>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/catalog?card=${card.card_id}`} prefetch={false} title="Ver en Catálogo">
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Ver en Catálogo
+          </Link>
+        </Button>
       </div>
       <CardForm
         cardTypes={cardTypes}

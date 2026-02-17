@@ -15,7 +15,7 @@
 
 'use client';
 
-import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
@@ -37,6 +37,7 @@ interface UserContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  refreshProfile: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -61,48 +62,58 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);
 
+  /** Load profile for an authenticated user (server is source of truth for role). */
+  const loadProfile = useCallback(async (authUser: User, accessToken?: string) => {
+    const supabase = createClient();
+
+    // Prefer /api/v1/me to avoid RLS issues and to guarantee role comes from DB.
+    try {
+      const headers: Record<string, string> = {};
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+      const response = await fetch('/api/v1/me', { headers });
+      if (response.ok && mountedRef.current) {
+        const json = await response.json();
+        if (json?.ok && json.data?.profile) {
+          setProfile(json.data.profile as UserProfile);
+          return;
+        }
+      }
+    } catch {
+      // API failed
+    }
+
+    // Secondary attempt: direct query (may be blocked by RLS in some setups).
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .single();
+
+      if (!error && data && mountedRef.current) {
+        setProfile(data as UserProfile);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Last resort: build from auth metadata (role defaults to 'user').
+    if (mountedRef.current) setProfile(buildFallbackProfile(authUser));
+  }, []);
+
+  /** Refresh profile from server — call after updating profile fields. */
+  const refreshProfile = useCallback(async () => {
+    if (!user) return;
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    await loadProfile(user, session?.access_token);
+  }, [user, loadProfile]);
+
   useEffect(() => {
     mountedRef.current = true;
     const supabase = createClient();
-
-    /** Load profile for an authenticated user (server is source of truth for role). */
-    async function loadProfile(session: { user: User; access_token?: string }) {
-      // Prefer /api/v1/me to avoid RLS issues and to guarantee role comes from DB.
-      try {
-        const headers: Record<string, string> = {};
-        if (session.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-
-        const response = await fetch('/api/v1/me', { headers });
-        if (response.ok && mountedRef.current) {
-          const json = await response.json();
-          if (json?.ok && json.data?.profile) {
-            setProfile(json.data.profile as UserProfile);
-            return;
-          }
-        }
-      } catch {
-        // API failed
-      }
-
-      // Secondary attempt: direct query (may be blocked by RLS in some setups).
-      try {
-        const { data, error } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .single();
-
-        if (!error && data && mountedRef.current) {
-          setProfile(data as UserProfile);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-
-      // Last resort: build from auth metadata (role defaults to 'user').
-      if (mountedRef.current) setProfile(buildFallbackProfile(session.user));
-    }
 
     // Subscribe to auth state changes — this is the single source of truth.
     // INITIAL_SESSION fires immediately with the current session (or null).
@@ -115,7 +126,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setUser(authUser);
 
       if (authUser && session) {
-        await loadProfile({ user: authUser, access_token: session.access_token });
+        await loadProfile(authUser, session.access_token);
       } else {
         setProfile(null);
       }
@@ -135,7 +146,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(timeout);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [loadProfile]);
 
   const value = useMemo(
     () => ({
@@ -144,8 +155,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated: !!user,
       isAdmin: profile?.role === 'admin',
+      refreshProfile,
     }),
-    [user, profile, isLoading],
+    [user, profile, isLoading, refreshProfile],
   );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 
 export default function CollectionPage() {
   return (
-    <div className="-m-6 h-[calc(100vh-3.5rem)]">
+    <div className="-m-5 lg:-m-8 h-[calc(100vh-3rem)]">
       <CollectionContainer />
     </div>
   );

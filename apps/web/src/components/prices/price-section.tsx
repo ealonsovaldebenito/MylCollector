@@ -1,5 +1,16 @@
 'use client';
 
+/**
+ * File: apps/web/src/components/prices/price-section.tsx
+ * Context: Catálogo/Precios → bloque principal por impresión.
+ * Description: Renderiza precios de tiendas + tabs de comunidad e histórico (tiendas por fuente).
+ * Relations:
+ * - History API: `GET /api/v1/prices/:printingId/history`
+ * - Store prices API: `GET /api/v1/prices/:printingId/stores`
+ * Changelog:
+ * - 2026-02-17: Tab "Histórico" muestra gráfico por tienda y queda como default.
+ */
+
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -64,10 +75,10 @@ export function PriceSection({ cardPrintingId, isAuthenticated = false, defaultC
       <StorePricesList cardPrintingId={cardPrintingId} />
 
       {/* Content with tabs */}
-      <Tabs defaultValue="community" className="w-full">
+      <Tabs defaultValue="stats" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="community">Precios comunitarios</TabsTrigger>
-          <TabsTrigger value="stats">Estadísticas</TabsTrigger>
+          <TabsTrigger value="stats">Histórico</TabsTrigger>
         </TabsList>
 
         <TabsContent value="community" className="mt-6">
@@ -81,7 +92,7 @@ export function PriceSection({ cardPrintingId, isAuthenticated = false, defaultC
         </TabsContent>
 
         <TabsContent value="stats" className="mt-6">
-          <PriceStatsCard stats={stats} isLoading={isLoading} />
+          <PriceStatsCard cardPrintingId={cardPrintingId} stats={stats} isLoading={isLoading} />
         </TabsContent>
       </Tabs>
     </div>

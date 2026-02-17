@@ -1,6 +1,6 @@
 /**
  * CardForm — Formulario de creación/edición de cartas (admin).
- * Tabs: Datos, Impresiones, Tiendas.
+ * Tabs: Datos, Impresiones, Tiendas, Sistema (solo edición).
  *
  * Relaciones:
  *   - cards → card_types, races (FK)
@@ -12,6 +12,8 @@
  *   2026-02-16 — Creación inicial con tabs y preview sidebar
  *   2026-02-17 — Fix: eliminar mensajes técnicos visibles en tab Tiendas
  *   2026-02-17 — UX: mejorar estados vacíos con iconos y mensajes claros
+ *   2026-02-17 — UX: mover Información del sistema a pestaña separada
+ *   2026-02-17 — Preview: reemplazar resumen por Habilidad
  */
 
 'use client';
@@ -441,6 +443,9 @@ export function CardForm({
               <TabsTrigger value="stores" disabled={mode !== 'edit' || !form.card_id || existingPrintings.length === 0}>
                 Tiendas
               </TabsTrigger>
+              {mode === 'edit' && form.card_id ? (
+                <TabsTrigger value="system">Sistema</TabsTrigger>
+              ) : null}
             </TabsList>
             {mode === 'edit' && form.card_id ? (
               <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -461,63 +466,6 @@ export function CardForm({
           </div>
 
           <TabsContent value="details" className="space-y-6">
-            {/* Metadata Section (Edit Mode) */}
-            {mode === 'edit' && form.card_id && (
-              <div className="rounded-lg border border-border bg-gradient-to-br from-muted/30 to-muted/10 p-5 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Info className="h-5 w-5 text-primary" />
-                  <h3 className="font-semibold text-lg">Informacion del Sistema</h3>
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="col-span-full flex items-center justify-between p-3 bg-background rounded-md border">
-                    <div className="flex-1">
-                      <Label className="text-xs text-muted-foreground mb-1 block">ID de Carta</Label>
-                      <code className="text-sm font-mono">{form.card_id}</code>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => copyToClipboard(form.card_id!)}
-                      title="Copiar ID"
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  {form.name_normalized && (
-                    <div className="p-3 bg-background rounded-md border">
-                      <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                        <Type className="h-3 w-3" />
-                        Nombre Normalizado
-                      </Label>
-                      <code className="text-xs text-muted-foreground">{form.name_normalized}</code>
-                    </div>
-                  )}
-
-                  {form.created_at && (
-                    <div className="p-3 bg-background rounded-md border">
-                      <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        Creacion
-                      </Label>
-                      <p className="text-xs">{new Date(form.created_at).toLocaleString('es-CL')}</p>
-                    </div>
-                  )}
-
-                  {form.updated_at && (
-                    <div className="p-3 bg-background rounded-md border">
-                      <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        Ultima Actualizacion
-                      </Label>
-                      <p className="text-xs">{new Date(form.updated_at).toLocaleString('es-CL')}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Basic Info Section */}
             <div className="rounded-lg border border-border bg-card p-6 space-y-5">
               <div className="flex items-center gap-2 pb-2">
@@ -758,6 +706,64 @@ export function CardForm({
           </div>
         </div>
 
+        </TabsContent>
+
+        <TabsContent value="system" className="space-y-6">
+          {mode === 'edit' && form.card_id ? (
+            <div className="rounded-lg border border-border bg-gradient-to-br from-muted/30 to-muted/10 p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <Info className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-lg">Información del sistema</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="col-span-full flex items-center justify-between p-3 bg-background rounded-md border">
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground mb-1 block">ID de carta</Label>
+                    <code className="text-sm font-mono">{form.card_id}</code>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => copyToClipboard(form.card_id!)}
+                    title="Copiar ID"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {form.name_normalized ? (
+                  <div className="p-3 bg-background rounded-md border">
+                    <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                      <Type className="h-3 w-3" />
+                      Nombre normalizado
+                    </Label>
+                    <code className="text-xs text-muted-foreground">{form.name_normalized}</code>
+                  </div>
+                ) : null}
+
+                {form.created_at ? (
+                  <div className="p-3 bg-background rounded-md border">
+                    <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      Creación
+                    </Label>
+                    <p className="text-xs">{new Date(form.created_at).toLocaleString('es-CL')}</p>
+                  </div>
+                ) : null}
+
+                {form.updated_at ? (
+                  <div className="p-3 bg-background rounded-md border">
+                    <Label className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      Última actualización
+                    </Label>
+                    <p className="text-xs">{new Date(form.updated_at).toLocaleString('es-CL')}</p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="printings" className="space-y-6">
@@ -1075,27 +1081,18 @@ export function CardForm({
             </div>
 
             <div className="rounded-md border border-border bg-background/50 p-3">
-              <Label className="text-xs text-muted-foreground">Resumen</Label>
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className="text-muted-foreground">Impresiones</p>
-                  <p className="font-mono font-medium">{existingPrintings.length}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Con imagen</p>
-                  <p className="font-mono font-medium">{imagePrintings.length}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Etiquetas</p>
-                  <p className="font-mono font-medium">{form.tag_ids.length}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Consenso</p>
-                  <p className="font-mono font-medium">
-                    {printingPriceSummary ? `${formatCLP(printingPriceSummary.min)}–${formatCLP(printingPriceSummary.max)}` : '—'}
+              <Label className="text-xs text-muted-foreground">Habilidad</Label>
+              <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground/90">
+                {form.text?.trim() ? form.text : 'Sin habilidad registrada.'}
+              </p>
+              {form.flavor_text?.trim() ? (
+                <div className="mt-3 border-t border-border/60 pt-3">
+                  <Label className="text-xs text-muted-foreground">Texto épico</Label>
+                  <p className="mt-2 whitespace-pre-wrap text-xs italic leading-relaxed text-muted-foreground">
+                    {form.flavor_text}
                   </p>
                 </div>
-              </div>
+              ) : null}
             </div>
 
             {/* Summary of new printings */}
@@ -1111,7 +1108,7 @@ export function CardForm({
                         <div key={d.id} className="flex items-center gap-1.5">
                           <div className="h-1.5 w-1.5 rounded-full bg-accent" />
                           <span className="text-xs">
-                            {edition ? editionDisplayName(edition.name) : 'Sin edicion'}
+                            {edition ? editionDisplayName(edition.name) : 'Sin edición'}
                           </span>
                           {d.imageFile && <ImagePlus className="h-3 w-3 text-muted-foreground" />}
                         </div>

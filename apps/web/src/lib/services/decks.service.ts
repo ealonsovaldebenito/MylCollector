@@ -84,6 +84,7 @@ export interface DeckLatestVersionRef {
 
 export interface DeckDetail extends DeckListItem {
   latest_version: DeckLatestVersionRef | null;
+  key_card_ids: string[];
 }
 
 /**
@@ -224,10 +225,25 @@ export async function getDeck(supabase: Client, deckId: string): Promise<DeckDet
 
   type DeckTagsRef = { tag_id: string };
   const row = deck as unknown as Omit<DeckDetail, 'tag_ids' | 'latest_version'> & { deck_tags?: DeckTagsRef[] | null };
+
+  // Key cards (optional table, backward compatible)
+  let keyCardIds: string[] = [];
+  const { data: keyRows, error: keyErr } = await supabase
+    .from('deck_key_cards')
+    .select('card_id')
+    .eq('deck_id', deckId);
+
+  if (!keyErr && keyRows) {
+    keyCardIds = keyRows.map((r) => r.card_id as string);
+  } else if (keyErr && !isPostgrestMissingIdentifier(keyErr, 'deck_key_cards')) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar cartas clave del mazo');
+  }
+
   return {
     ...(row as unknown as Omit<DeckDetail, 'tag_ids' | 'latest_version'>),
     tag_ids: (row.deck_tags ?? []).map((t) => t.tag_id),
     latest_version: (latestVersion ?? null) as DeckLatestVersionRef | null,
+    key_card_ids: keyCardIds,
   };
 }
 
@@ -355,6 +371,7 @@ export async function createDeckVersion(
       card_printing_id: c.card_printing_id,
       qty: c.qty,
       is_starting_gold: c.is_starting_gold ?? false,
+      is_key_card: c.is_key_card ?? false,
     }));
 
     const { error: cardsErr } = await supabase.from('deck_version_cards').insert(cardRows);
@@ -410,7 +427,7 @@ export async function getDeckVersion(supabase: Client, versionId: string) {
   const { data: cards, error: cErr } = await supabase
     .from('deck_version_cards')
     .select(`
-      deck_version_card_id, deck_version_id, card_printing_id, qty, is_starting_gold,
+      deck_version_card_id, deck_version_id, card_printing_id, qty, is_starting_gold, is_key_card,
       card_printing:card_printings!inner(
         card_printing_id, card_id, edition_id, rarity_tier_id, image_url, illustrator,
         collector_number, legal_status, printing_variant,

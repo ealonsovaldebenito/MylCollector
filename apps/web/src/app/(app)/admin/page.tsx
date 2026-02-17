@@ -122,7 +122,7 @@ export default function AdminPage() {
     <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-amber-500 shadow-lg shadow-indigo-500/20">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20">
           <Shield className="h-6 w-6 text-white" />
         </div>
         <div>

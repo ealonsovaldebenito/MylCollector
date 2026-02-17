@@ -1,9 +1,15 @@
+/**
+ * useToast — Wrapper sobre sonner para compatibilidad con API existente.
+ *
+ * Changelog:
+ *   2026-02-16 — Placeholder original
+ *   2026-02-18 — Reemplazado con wrapper de sonner
+ */
+
 'use client';
 
-/**
- * Simple toast hook placeholder
- * For a full implementation, consider using sonner or react-hot-toast
- */
+import { toast as sonnerToast } from 'sonner';
+
 export function useToast() {
   const toast = ({
     title,
@@ -14,12 +20,14 @@ export function useToast() {
     description?: string;
     variant?: 'default' | 'destructive';
   }) => {
-    // For now, just console log
-    // TODO: Implement proper toast UI (sonner or react-hot-toast)
-    console.log(`[Toast ${variant}] ${title}`, description);
+    if (variant === 'destructive') {
+      sonnerToast.error(title, { description });
+    } else {
+      sonnerToast.success(title, { description });
+    }
   };
 
-  return {
-    toast,
-  };
+  return { toast };
 }
+
+export { sonnerToast as toast };

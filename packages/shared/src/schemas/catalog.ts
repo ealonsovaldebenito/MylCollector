@@ -52,6 +52,13 @@ export const tagSchema = z.object({
   slug: z.string(),
 });
 
+export const cardConditionRefSchema = z.object({
+  condition_id: z.string().uuid(),
+  code: z.string(),
+  name: z.string(),
+  sort_order: z.number().int(),
+});
+
 // Inferred types
 export type Block = z.infer<typeof blockSchema>;
 export type Edition = z.infer<typeof editionSchema>;
@@ -60,3 +67,4 @@ export type CardType = z.infer<typeof cardTypeSchema>;
 export type Race = z.infer<typeof raceSchema>;
 export type RarityTier = z.infer<typeof rarityTierSchema>;
 export type Tag = z.infer<typeof tagSchema>;
+export type CardConditionRef = z.infer<typeof cardConditionRefSchema>;

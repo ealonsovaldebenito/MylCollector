@@ -3,6 +3,9 @@
  * Se reemplazaran por tipos auto-generados cuando se conecte Supabase CLI.
  *
  * Doc reference: 03_DATA_MODEL_SQL.md, 00_GLOSSARY_AND_IDS.md
+ * Changelog:
+ * - 2026-02-17: Agrega typing para RPC `card_deck_stats` usada por stats del catalogo.
+ * - 2026-02-18: Agrega deck_likes, deck_comments, user_followers + counters en decks + RPC get_public_decks.
  */
 
 type LegalStatusType = 'LEGAL' | 'RESTRICTED' | 'BANNED' | 'DISCONTINUED';
@@ -622,6 +625,9 @@ export interface Database {
           strategy: string | null;
           cover_image_url: string | null;
           visibility: VisibilityLevel;
+          like_count: number;
+          view_count: number;
+          comment_count: number;
           created_at: string;
           updated_at: string;
         };
@@ -636,6 +642,9 @@ export interface Database {
           strategy?: string | null;
           cover_image_url?: string | null;
           visibility?: VisibilityLevel;
+          like_count?: number;
+          view_count?: number;
+          comment_count?: number;
         };
         Update: {
           format_id?: string;
@@ -646,6 +655,9 @@ export interface Database {
           strategy?: string | null;
           cover_image_url?: string | null;
           visibility?: VisibilityLevel;
+          like_count?: number;
+          view_count?: number;
+          comment_count?: number;
         };
         Relationships: [];
       };
@@ -661,6 +673,23 @@ export interface Database {
           deck_tag_id?: string;
           deck_id: string;
           tag_id: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+
+      deck_key_cards: {
+        Row: {
+          deck_key_card_id: string;
+          deck_id: string;
+          card_id: string;
+          created_at: string;
+        };
+        Insert: {
+          deck_key_card_id?: string;
+          deck_id: string;
+          card_id: string;
           created_at?: string;
         };
         Update: Record<string, never>;
@@ -694,6 +723,7 @@ export interface Database {
           card_printing_id: string;
           qty: number;
           is_starting_gold: boolean;
+          is_key_card: boolean;
           created_at: string;
         };
         Insert: {
@@ -702,10 +732,12 @@ export interface Database {
           card_printing_id: string;
           qty: number;
           is_starting_gold?: boolean;
+          is_key_card?: boolean;
         };
         Update: {
           qty?: number;
           is_starting_gold?: boolean;
+          is_key_card?: boolean;
         };
         Relationships: [];
       };
@@ -1056,11 +1088,124 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+
+      // ================================================================
+      // Community Social
+      // ================================================================
+
+      deck_likes: {
+        Row: {
+          like_id: string;
+          deck_id: string;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          like_id?: string;
+          deck_id: string;
+          user_id: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+
+      deck_comments: {
+        Row: {
+          comment_id: string;
+          deck_id: string;
+          user_id: string;
+          parent_id: string | null;
+          content: string;
+          is_deleted: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          comment_id?: string;
+          deck_id: string;
+          user_id: string;
+          parent_id?: string | null;
+          content: string;
+          is_deleted?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          content?: string;
+          is_deleted?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      user_followers: {
+        Row: {
+          follower_id: string;
+          followee_id: string;
+          created_at: string;
+        };
+        Insert: {
+          follower_id: string;
+          followee_id: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;
 
-    Functions: Record<string, never>;
+    Functions: {
+      card_deck_stats: {
+        Args: {
+          target_card_id: string;
+          top_n?: number;
+        };
+        Returns: {
+          deck_count: number;
+          top_companions: Array<{
+            card_id: string;
+            name: string;
+            image_url: string | null;
+            decks_with: number;
+            total_qty: number;
+          }>;
+        };
+      };
+      get_public_decks: {
+        Args: {
+          p_format_id?: string | null;
+          p_edition_id?: string | null;
+          p_race_id?: string | null;
+          p_q?: string | null;
+          p_sort?: string;
+          p_limit?: number;
+          p_offset?: number;
+        };
+        Returns: Array<{
+          deck_id: string;
+          name: string;
+          description: string | null;
+          user_id: string;
+          display_name: string;
+          avatar_url: string | null;
+          format_id: string;
+          format_name: string;
+          format_code: string;
+          edition_id: string | null;
+          race_id: string | null;
+          like_count: number;
+          view_count: number;
+          comment_count: number;
+          visibility: string;
+          created_at: string;
+          updated_at: string;
+          total_count: number;
+        }>;
+      };
+    };
 
     Enums: {
       legal_status_type: LegalStatusType;

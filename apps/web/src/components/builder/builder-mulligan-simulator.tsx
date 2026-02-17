@@ -1,3 +1,20 @@
+/**
+ * File: apps/web/src/components/builder/builder-mulligan-simulator.tsx
+ *
+ * BuilderMulliganSimulator — Simula manos iniciales y mulligans desde el mazo actual.
+ *
+ * Relaciones:
+ * - Consume `DeckCardSlot[]` desde `useDeckBuilder` vía `BuilderWorkspace`.
+ *
+ * Bugfixes / Notas:
+ * - Adaptado a modelo “por copia” (cada slot es una copia; no depende de `qty`).
+ * - La mano se agrupa y ordena por coste (y nombre) y muestra cantidades.
+ * - Agrega curva visual de mano + plan sugerido por turnos (1 oro/turno).
+ *
+ * Changelog:
+ * - 2026-02-17 — Fix: pool por copia + orden por coste + plan sugerido.
+ */
+
 'use client';
 
 import { useMemo, useState } from 'react';
@@ -33,14 +50,12 @@ function buildPool(cards: DeckCardSlot[]) {
   const pool: Array<Omit<HandEntry, 'qty'>> = [];
   for (const slot of cards) {
     if (slot.is_starting_gold) continue;
-    for (let i = 0; i < slot.qty; i++) {
-      pool.push({
-        card_printing_id: slot.card_printing_id,
-        name: slot.card.name,
-        type: slot.card.card_type.name,
-        cost: slot.card.cost ?? null,
-      });
-    }
+    pool.push({
+      card_printing_id: slot.card_printing_id,
+      name: slot.card.name,
+      type: slot.card.card_type.name,
+      cost: slot.card.cost ?? null,
+    });
   }
   return pool;
 }
@@ -52,7 +67,12 @@ function groupHand(entries: Array<Omit<HandEntry, 'qty'>>): HandEntry[] {
     if (existing) existing.qty += 1;
     else map.set(e.card_printing_id, { ...e, qty: 1 });
   }
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return [...map.values()].sort((a, b) => {
+    const ca = a.cost ?? 999;
+    const cb = b.cost ?? 999;
+    if (ca !== cb) return ca - cb;
+    return a.name.localeCompare(b.name, 'es');
+  });
 }
 
 export function BuilderMulliganSimulator({ cards }: { cards: DeckCardSlot[] }) {
@@ -92,6 +112,36 @@ export function BuilderMulliganSimulator({ cards }: { cards: DeckCardSlot[] }) {
     setHand([]);
   }
 
+  const handCostCurve = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const h of hand) {
+      const k = h.cost == null ? 'N/A' : String(h.cost);
+      map.set(k, (map.get(k) ?? 0) + h.qty);
+    }
+    const entries = Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === 'N/A') return 1;
+      if (b === 'N/A') return -1;
+      return Number(a) - Number(b);
+    });
+    const max = entries.length > 0 ? Math.max(...entries.map(([, v]) => v), 1) : 1;
+    return { entries, max };
+  }, [hand]);
+
+  const suggestedTurns = useMemo(() => {
+    const byCost = new Map<number, HandEntry[]>();
+    for (const h of hand) {
+      if (h.cost == null) continue;
+      const list = byCost.get(h.cost) ?? [];
+      list.push(h);
+      byCost.set(h.cost, list);
+    }
+    for (const [k, list] of byCost.entries()) {
+      list.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+      byCost.set(k, list);
+    }
+    return byCost;
+  }, [hand]);
+
   return (
     <div className="rounded-lg border border-border bg-muted/10 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -105,13 +155,7 @@ export function BuilderMulliganSimulator({ cards }: { cards: DeckCardSlot[] }) {
           </p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={handleReset}
-            disabled={hand.length === 0 && mulligans === 0}
-          >
+          <Button type="button" size="sm" variant="outline" onClick={handleReset} disabled={hand.length === 0 && mulligans === 0}>
             <RotateCcw className="mr-1 h-3.5 w-3.5" />
             Reset
           </Button>
@@ -166,30 +210,65 @@ export function BuilderMulliganSimulator({ cards }: { cards: DeckCardSlot[] }) {
         ) : hand.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">Presiona “Nueva mano” para comenzar.</p>
         ) : (
-          <div className="space-y-1.5">
-            {hand.map((h) => (
-              <div
-                key={h.card_printing_id}
-                className={cn(
-                  'flex items-center justify-between gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5',
-                )}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-xs font-medium">{h.name}</span>
-                    {h.qty > 1 ? (
-                      <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
-                        x{h.qty}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="truncate">{h.type}</span>
-                    <span className="flex-shrink-0">· C:{h.cost ?? '—'}</span>
+          <div className="space-y-3">
+            <div className="rounded-md border border-border/60 bg-background p-2">
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">Curva de coste (mano)</div>
+              <div className="space-y-1.5">
+                {handCostCurve.entries.map(([cost, qty]) => {
+                  const pct = (qty / handCostCurve.max) * 100;
+                  return (
+                    <div key={cost} className="flex items-center gap-2">
+                      <span className="w-8 text-[11px] font-mono text-muted-foreground">{cost === 'N/A' ? '—' : cost}</span>
+                      <div className="relative h-3 flex-1 overflow-hidden rounded bg-muted">
+                        <div className="h-full bg-primary/60" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="w-6 text-right text-[11px] font-mono font-semibold">{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border/60 bg-background p-2">
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">Plan sugerido (1 oro/turno)</div>
+              <div className="space-y-1 text-[11px]">
+                {[1, 2, 3, 4, 5].map((t) => {
+                  const list = suggestedTurns.get(t) ?? [];
+                  const total = list.reduce((s, x) => s + x.qty, 0);
+                  return (
+                    <div key={t} className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">T{t}</span>
+                      {total === 0 ? (
+                        <span className="text-muted-foreground">Sin jugadas de coste {t}</span>
+                      ) : (
+                        <span className="text-right text-foreground">{list.map((x) => `${x.name} x${x.qty}`).join(' · ')}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              {hand.map((h) => (
+                <div key={h.card_printing_id} className={cn('flex items-center justify-between gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5')}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-xs font-medium">{h.name}</span>
+                      {h.qty > 1 ? (
+                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                          x{h.qty}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span className="truncate">{h.type}</span>
+                      <span className="flex-shrink-0">· C:{h.cost ?? '—'}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>

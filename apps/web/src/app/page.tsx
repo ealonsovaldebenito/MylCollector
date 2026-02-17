@@ -92,7 +92,7 @@ export default function LandingPage() {
       {/* ══════════ NAV BAR ══════════ */}
       <nav className="relative z-20 mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-amber-500 text-sm font-bold text-white shadow-md">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white shadow-md">
             M
           </div>
           <span className="font-display text-xl font-bold tracking-tight">MYL</span>
@@ -140,7 +140,7 @@ export default function LandingPage() {
           <h1 className="animate-fade-in stagger-1 max-w-3xl font-display text-5xl leading-[1.1] font-bold tracking-tight md:text-7xl">
             Construye mazos válidos.
             <br />
-            <span className="bg-gradient-to-r from-indigo-400 to-amber-400 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-indigo-400 to-indigo-300 bg-clip-text text-transparent">
               Decide con datos.
             </span>
           </h1>
@@ -155,7 +155,7 @@ export default function LandingPage() {
           <div className="animate-fade-in stagger-3 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="/decks"
-              className="group flex items-center gap-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-amber-600 px-8 py-3.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5"
+              className="group flex items-center gap-2.5 rounded-xl bg-primary px-8 py-3.5 font-semibold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5"
             >
               <Swords className="h-5 w-5 transition-transform group-hover:rotate-12" />
               Entrar al Constructor
@@ -226,7 +226,7 @@ export default function LandingPage() {
       <footer className="relative z-10 border-t border-border/40 bg-card/30 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 py-8 text-center md:flex-row md:justify-between md:text-left">
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-amber-500 text-xs font-bold text-white">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-white">
               M
             </div>
             <span className="font-display font-bold">MYL</span>

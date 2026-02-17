@@ -1,6 +1,6 @@
 'use client';
 
-import type { Block, Edition, CardType, Race, RarityTier, CardCondition } from '@myl/shared';
+import type { Block, Edition, CardType, Race, RarityTier } from '@myl/shared';
 import { editionDisplayName } from '@myl/shared';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { FilterX, Layers, BookOpen, Zap, Users, Gem, FileCheck } from 'lucide-react';
+import { FilterX, Layers, BookOpen, Zap, Users, Gem, Shield, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface CollectionFilterValues {
@@ -18,7 +18,7 @@ export interface CollectionFilterValues {
   card_type_id?: string;
   race_id?: string;
   rarity_tier_id?: string;
-  condition?: CardCondition;
+  legal_status?: 'STANDARD' | 'DISCONTINUED';
   min_qty?: number;
   sort?: 'name_asc' | 'name_desc' | 'qty_asc' | 'qty_desc' | 'acquired_asc' | 'acquired_desc' | 'cost_asc' | 'cost_desc';
 }
@@ -34,14 +34,9 @@ interface CollectionFiltersProps {
   className?: string;
 }
 
-const CONDITION_OPTIONS: { value: CardCondition; label: string }[] = [
-  { value: 'MINT', label: 'Mint' },
-  { value: 'NEAR_MINT', label: 'Near Mint' },
-  { value: 'EXCELLENT', label: 'Excelente' },
-  { value: 'GOOD', label: 'Buena' },
-  { value: 'LIGHT_PLAYED', label: 'Poco Jugada' },
-  { value: 'PLAYED', label: 'Jugada' },
-  { value: 'POOR', label: 'Pobre' },
+const LEGAL_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: 'STANDARD', label: 'Vigente' },
+  { value: 'DISCONTINUED', label: 'Discontinuada' },
 ];
 
 const SORT_OPTIONS = [
@@ -82,8 +77,8 @@ export function CollectionFilters({
       } else {
         delete next[key];
       }
-    } else if (key === 'condition') {
-      next[key] = value as CardCondition;
+    } else if (key === 'legal_status') {
+      next[key] = value as 'STANDARD' | 'DISCONTINUED';
     } else {
       (next as Record<string, string>)[key] = value;
     }
@@ -263,19 +258,19 @@ export function CollectionFilters({
 
       <Separator />
 
-      {/* Condition */}
+      {/* Legal status */}
       <div className="space-y-2">
         <Label className="flex items-center gap-1.5 text-xs font-medium">
-          <FileCheck className="h-3.5 w-3.5" />
-          Condición
+          <Shield className="h-3.5 w-3.5" />
+          Estado Legal
         </Label>
-        <Select value={filters.condition ?? '__all__'} onValueChange={(v) => update('condition', v)}>
+        <Select value={filters.legal_status ?? '__all__'} onValueChange={(v) => update('legal_status', v)}>
           <SelectTrigger className="h-9">
-            <SelectValue placeholder="Todas las condiciones" />
+            <SelectValue placeholder="Todos los estados" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">Todas las condiciones</SelectItem>
-            {CONDITION_OPTIONS.map((opt) => (
+            <SelectItem value="__all__">Todos los estados</SelectItem>
+            {LEGAL_STATUS_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
@@ -284,9 +279,14 @@ export function CollectionFilters({
         </Select>
       </div>
 
-      {/* Min quantity */}
+      <Separator />
+
+      {/* Duplicates / min quantity */}
       <div className="space-y-2">
-        <Label className="text-xs font-medium">Cantidad mínima</Label>
+        <Label className="flex items-center gap-1.5 text-xs font-medium">
+          <Copy className="h-3.5 w-3.5" />
+          Cantidad mínima
+        </Label>
         <Input
           type="number"
           min="1"
@@ -295,6 +295,9 @@ export function CollectionFilters({
           onChange={(e) => update('min_qty', e.target.value)}
           className="h-9"
         />
+        <p className="text-[11px] text-muted-foreground">
+          Usa 2+ para ver solo duplicadas
+        </p>
       </div>
 
       {/* Active filters summary */}
@@ -317,8 +320,8 @@ export function CollectionFilters({
                   label = races.find((r) => r.race_id === value)?.name ?? label;
                 } else if (key === 'rarity_tier_id') {
                   label = rarities.find((r) => r.rarity_tier_id === value)?.name ?? label;
-                } else if (key === 'condition') {
-                  label = CONDITION_OPTIONS.find((c) => c.value === value)?.label ?? label;
+                } else if (key === 'legal_status') {
+                  label = LEGAL_STATUS_OPTIONS.find((s) => s.value === value)?.label ?? label;
                 }
                 return (
                   <Badge key={key} variant="secondary" className="text-xs">

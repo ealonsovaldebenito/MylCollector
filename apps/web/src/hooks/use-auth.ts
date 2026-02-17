@@ -124,11 +124,23 @@ export function useAuth() {
     setError(null);
 
     try {
+      // 1. Update auth metadata
       const { error: authError } = await supabase.auth.updateUser({
         data: updates,
       });
 
       if (authError) throw authError;
+
+      // 2. Sync to DB profile via API (bypasses RLS issues)
+      const res = await fetch('/api/v1/me', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const json = await res.json();
+      if (!json?.ok) {
+        throw new Error(json?.error?.message ?? 'Error al sincronizar perfil');
+      }
 
       return true;
     } catch (err) {
@@ -149,10 +161,10 @@ export function useAuth() {
 
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      const filePath = fileName; // stored at bucket root
 
       const { error: uploadError } = await supabase.storage
-        .from('public')
+        .from('avatars')
         .upload(filePath, file, {
           cacheControl: '3600',
           upsert: true,
@@ -161,7 +173,7 @@ export function useAuth() {
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
-        .from('public')
+        .from('avatars')
         .getPublicUrl(filePath);
 
       // Update user metadata with new avatar URL

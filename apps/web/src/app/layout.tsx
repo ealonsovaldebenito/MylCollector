@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { DM_Sans, Playfair_Display, JetBrains_Mono } from 'next/font/google';
+import { ThemeProvider } from 'next-themes';
+import { Toaster } from '@/components/ui/sonner';
 import './globals.css';
 
 const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-sans' });
@@ -17,7 +19,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className={`${dmSans.variable} ${playfair.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
-        {children}
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

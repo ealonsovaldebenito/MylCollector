@@ -1,17 +1,23 @@
+/**
+ * AuthBackground — Fondo animado para páginas de auth.
+ * Usa colores del tema (tokens CSS) para respetar dark/light mode.
+ *
+ * Changelog:
+ *   2026-02-17 — Migrado de colores hardcoded a tokens del tema
+ */
+
 'use client';
 
 export function AuthBackground() {
   return (
-    <div className="absolute inset-0 -z-10 overflow-hidden bg-slate-50">
-      {/* Clean gradient background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-amber-50" />
+    <div className="absolute inset-0 -z-10 overflow-hidden bg-background">
+      {/* Gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-background to-primary/3" />
 
-      {/* Subtle geometric shapes */}
-      <div className="absolute -left-20 top-20 h-96 w-96 rounded-full bg-indigo-200/30 blur-3xl" />
-      <div className="absolute -right-20 bottom-20 h-96 w-96 rounded-full bg-amber-200/30 blur-3xl" />
-
-      {/* Subtle grid pattern */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#8b5cf610_1px,transparent_1px),linear-gradient(to_bottom,#8b5cf610_1px,transparent_1px)] bg-[size:32px_32px]" />
+      {/* Animated blobs using theme colors */}
+      <div className="animate-blob absolute -left-20 top-20 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
+      <div className="animate-blob animation-delay-2000 absolute -right-20 bottom-20 h-96 w-96 rounded-full bg-primary/8 blur-3xl" />
+      <div className="animate-blob animation-delay-4000 absolute left-1/2 top-1/3 h-64 w-64 rounded-full bg-primary/5 blur-3xl" />
     </div>
   );
 }

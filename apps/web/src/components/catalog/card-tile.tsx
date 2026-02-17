@@ -84,11 +84,11 @@ export function CardTile({
       type="button"
       onClick={onClick}
       className={cn(
-        'group relative flex flex-col overflow-hidden rounded-lg border border-border',
-        'bg-card text-left transition-all duration-200',
-        'hover:scale-[1.02] hover:border-accent/30 hover:shadow-xl',
+        'group relative flex flex-col overflow-hidden rounded-xl border border-border/30',
+        'bg-card/80 text-left transition-all duration-300',
+        'hover:scale-[1.03] hover:border-accent/30 hover:shadow-xl hover:shadow-accent/5',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        'animate-fade-in',
+        'animate-stagger-fade-in',
         glowClass,
         className,
       )}

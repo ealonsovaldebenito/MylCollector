@@ -1,3 +1,19 @@
+/**
+ * File: apps/web/src/components/builder/builder-cost-panel.tsx
+ *
+ * BuilderCostPanel — Calcula el costeo del mazo usando precios por impresión.
+ *
+ * Relaciones:
+ * - Consume `DeckCardSlot[]` desde `useDeckBuilder` vía `BuilderWorkspace`.
+ * - Precio principal: POST `/api/v1/prices/consensus` (bulk por `card_printing_id`).
+ *
+ * Bugfixes / Notas:
+ * - Adaptado al modelo “por copia”: agrega cantidades por `card_printing_id` para tablas y totales.
+ *
+ * Changelog:
+ * - 2026-02-17 — Fix: costeo por copia + agregación por impresión.
+ */
+
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -29,6 +45,7 @@ function formatMoney(value: number, currencyCode: string) {
 
 export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
   const [prices, setPrices] = useState<Map<string, PriceRow>>(new Map());
+  const [storeAvg, setStoreAvg] = useState<Map<string, number>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
 
   const printingIds = useMemo(
@@ -39,6 +56,7 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
   useEffect(() => {
     if (printingIds.length === 0) {
       setPrices(new Map());
+      setStoreAvg(new Map());
       return;
     }
 
@@ -55,6 +73,7 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
         const json = await res.json();
         if (!json.ok) {
           setPrices(new Map());
+          setStoreAvg(new Map());
           return;
         }
 
@@ -63,6 +82,40 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
           next.set(row.card_printing_id, row);
         }
         setPrices(next);
+
+        // Fallback: promedio de tiendas para impresiones sin consenso
+        const consensusIds = new Set<string>(Array.from(next.keys()));
+        const missing = printingIds.filter((id) => !consensusIds.has(id));
+        if (missing.length === 0) {
+          setStoreAvg(new Map());
+          return;
+        }
+
+        type StoreLinkRow = { last_price: number | null };
+        const results = await Promise.all(
+          missing.map(async (id) => {
+            try {
+              const sRes = await fetch(`/api/v1/prices/${id}/stores`, { signal: ctrl.signal });
+              const sJson = await sRes.json();
+              if (!sJson.ok) return { id, avg: null as number | null };
+              const items = (sJson.data.items ?? []) as StoreLinkRow[];
+              const prices = items
+                .map((x) => x.last_price)
+                .filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+              if (prices.length === 0) return { id, avg: null as number | null };
+              const avg = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+              return { id, avg };
+            } catch {
+              return { id, avg: null as number | null };
+            }
+          }),
+        );
+
+        const nextStore = new Map<string, number>();
+        for (const r of results) {
+          if (r.avg != null) nextStore.set(r.id, r.avg);
+        }
+        setStoreAvg(nextStore);
       } catch {
         // ignore
       } finally {
@@ -77,20 +130,29 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
   }, [printingIds]);
 
   const computed = useMemo(() => {
-    const lines = cards.map((slot) => {
-      const price = prices.get(slot.card_printing_id) ?? null;
-      const unit = price?.consensus_price ?? null;
-      const currencyCode = price?.currency_code ?? null;
-      const total = unit == null ? null : unit * slot.qty;
+    const qtyByPrinting = new Map<string, { sample: DeckCardSlot; qty: number }>();
+    for (const slot of cards) {
+      const existing = qtyByPrinting.get(slot.card_printing_id);
+      if (existing) existing.qty += 1;
+      else qtyByPrinting.set(slot.card_printing_id, { sample: slot, qty: 1 });
+    }
+
+    const lines = Array.from(qtyByPrinting.values()).map(({ sample, qty }) => {
+      const price = prices.get(sample.card_printing_id) ?? null;
+      const fallback = storeAvg.get(sample.card_printing_id) ?? null;
+      const unit = price?.consensus_price ?? fallback ?? null;
+      const currencyCode = price?.currency_code ?? (fallback != null ? 'CLP' : null);
+      const total = unit == null ? null : unit * qty;
       return {
-        card_printing_id: slot.card_printing_id,
-        name: slot.card.name,
-        typeCode: slot.card.card_type.code,
-        typeName: slot.card.card_type.name,
-        qty: slot.qty,
+        card_printing_id: sample.card_printing_id,
+        name: sample.card.name,
+        typeCode: sample.card.card_type.code,
+        typeName: sample.card.card_type.name,
+        qty,
         unit,
         total,
         currencyCode,
+        source: price?.consensus_price != null ? 'CONSENSUS' : fallback != null ? 'STORE_AVG' : null,
       };
     });
 
@@ -137,7 +199,7 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
       avgByCurrency,
       byType,
     };
-  }, [cards, prices]);
+  }, [cards, prices, storeAvg]);
 
   if (cards.length === 0) {
     return (
@@ -179,9 +241,7 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
                   ))}
                 </div>
               )}
-              <div className="mt-1 text-[11px] text-muted-foreground">
-                Basado en consenso por impresión
-              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">Prioridad: Consenso comunidad → Promedio tiendas</div>
             </CardContent>
           </Card>
 
@@ -299,9 +359,16 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">{line.qty}</TableCell>
                         <TableCell className="text-right font-mono text-xs">
-                          {line.unit == null || !line.currencyCode
-                            ? '—'
-                            : formatMoney(line.unit, line.currencyCode)}
+                          {line.unit == null || !line.currencyCode ? (
+                            '—'
+                          ) : (
+                            <div className="flex flex-col items-end leading-tight">
+                              <span>{formatMoney(line.unit, line.currencyCode)}</span>
+                              <span className="text-[10px] font-normal text-muted-foreground">
+                                {line.source === 'CONSENSUS' ? 'consenso' : line.source === 'STORE_AVG' ? 'tiendas' : ''}
+                              </span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">
                           {line.total == null || !line.currencyCode
@@ -313,13 +380,10 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
                 </TableBody>
               </Table>
             </div>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Se muestran hasta 60 filas. Las cartas sin consenso aparecen como "—".
-            </p>
+            <p className="mt-2 text-[11px] text-muted-foreground">Se muestran hasta 60 filas. Las cartas sin precio aparecen como "—".</p>
           </CardContent>
         </Card>
       </div>
     </ScrollArea>
   );
 }
-

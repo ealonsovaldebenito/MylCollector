@@ -1,5 +1,15 @@
 'use client';
 
+/**
+ * File: apps/web/src/components/catalog/card-detail-page.tsx
+ * Context: Página legacy de detalle de carta (ruta dedicada) — aún usada como fallback/compatibilidad.
+ * Description: Renderiza hero + tabs + sección de similares.
+ * Relations:
+ * - Similar UI: `apps/web/src/components/catalog/card-detail-similar.tsx`
+ * Changelog:
+ * - 2026-02-17: Adapta similares a props livianas (card_id/name/image_url) y links `/catalog?card=`.
+ */
+
 import type { CardDetail } from '@myl/shared';
 import { editionDisplayName } from '@myl/shared';
 import { Breadcrumb } from '@/components/ui/breadcrumb';
@@ -111,7 +121,14 @@ export function CardDetailPage({ card, similarCards }: CardDetailPageProps) {
 
       {/* Similar cards */}
       {similarCards.length > 0 && (
-        <CardDetailSimilar cards={similarCards} currentCardType={card.card_type.name} />
+        <CardDetailSimilar
+          cards={similarCards.map((c) => ({
+            card_id: c.card_id,
+            name: c.name,
+            image_url: c.printings[0]?.image_url ?? null,
+          }))}
+          currentCardType={card.card_type.name}
+        />
       )}
     </div>
   );
