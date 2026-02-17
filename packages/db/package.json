@@ -24,12 +24,12 @@
     "db:seed": "supabase db reset --db-url $DATABASE_URL < supabase/seed.sql"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.47.0",
-    "@myl/shared": "workspace:*"
+    "@myl/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.93.3"
   },
   "devDependencies": {
-    "supabase": "^2.0.0",
-    "typescript": "^5.7.0",
-    "rimraf": "^6.0.0"
+    "rimraf": "^6.1.2",
+    "supabase": "^2.75.1",
+    "typescript": "^5.9.3"
   }
 }

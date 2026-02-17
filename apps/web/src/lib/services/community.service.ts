@@ -22,6 +22,7 @@ export async function getPublicDecks(
   supabase: Client,
   filters: PublicDeckFilters,
   viewerId?: string,
+  isAdmin = false,
 ) {
   const { data, error } = await supabase.rpc('get_public_decks', {
     p_format_id: filters.format_id ?? null,
@@ -31,6 +32,7 @@ export async function getPublicDecks(
     p_sort: filters.sort,
     p_limit: filters.limit,
     p_offset: filters.offset,
+    p_is_admin: isAdmin,
   });
 
   if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar mazos públicos', { error });

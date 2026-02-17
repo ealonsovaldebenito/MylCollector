@@ -170,7 +170,8 @@ CREATE OR REPLACE FUNCTION get_public_decks(
   p_q          text    DEFAULT NULL,
   p_sort       text    DEFAULT 'newest',
   p_limit      int     DEFAULT 20,
-  p_offset     int     DEFAULT 0
+  p_offset     int     DEFAULT 0,
+  p_is_admin   boolean DEFAULT false
 )
 RETURNS TABLE(
   deck_id        uuid,
@@ -195,10 +196,10 @@ RETURNS TABLE(
 DECLARE
   v_total bigint;
 BEGIN
-  -- Count total matching
+  -- Count total matching (admin sees all, users see only PUBLIC)
   SELECT count(*) INTO v_total
   FROM decks d
-  WHERE d.visibility = 'PUBLIC'
+  WHERE (p_is_admin OR d.visibility = 'PUBLIC')
     AND (p_format_id  IS NULL OR d.format_id  = p_format_id)
     AND (p_edition_id IS NULL OR d.edition_id = p_edition_id)
     AND (p_race_id    IS NULL OR d.race_id    = p_race_id)
@@ -227,7 +228,7 @@ BEGIN
   FROM decks d
   LEFT JOIN user_profiles up ON up.user_id = d.user_id
   LEFT JOIN formats f ON f.format_id = d.format_id
-  WHERE d.visibility = 'PUBLIC'
+  WHERE (p_is_admin OR d.visibility = 'PUBLIC')
     AND (p_format_id  IS NULL OR d.format_id  = p_format_id)
     AND (p_edition_id IS NULL OR d.edition_id = p_edition_id)
     AND (p_race_id    IS NULL OR d.race_id    = p_race_id)
