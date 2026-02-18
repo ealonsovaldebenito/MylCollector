@@ -6,6 +6,7 @@
  * Changelog:
  * - 2026-02-18: Initial version.
  * - 2026-02-18: Refined layout and theme-aligned styling.
+ * - 2026-02-18: UX cleanup: removed "Otros" bucket, hid zero-value stats/rows, excluded Oro cards from cost curve.
  */
 
 'use client';
@@ -17,7 +18,6 @@ import {
   CalendarDays,
   Coins,
   Gem,
-  Layers,
   Mountain,
   Shield,
   Star,
@@ -49,11 +49,11 @@ interface DeckDistributionBoardProps {
   className?: string;
 }
 
-type TypeBucket = 'ally' | 'weapon' | 'totem' | 'talisman' | 'gold' | 'other';
+type TypeBucket = 'ally' | 'weapon' | 'totem' | 'talisman' | 'gold';
 type CurveBucket = '0' | '1' | '2' | '3' | '4' | '5' | '6+';
 
 const CURVE_BUCKETS: CurveBucket[] = ['0', '1', '2', '3', '4', '5', '6+'];
-const TYPE_ORDER: TypeBucket[] = ['ally', 'weapon', 'totem', 'talisman', 'gold', 'other'];
+const TYPE_ORDER: TypeBucket[] = ['ally', 'weapon', 'totem', 'talisman', 'gold'];
 
 const TYPE_META: Record<TypeBucket, { label: string; icon: LucideIcon }> = {
   ally: { label: 'Aliado', icon: Users },
@@ -61,7 +61,6 @@ const TYPE_META: Record<TypeBucket, { label: string; icon: LucideIcon }> = {
   totem: { label: 'Totem', icon: Mountain },
   talisman: { label: 'Talisman', icon: Gem },
   gold: { label: 'Oro', icon: Coins },
-  other: { label: 'Otros', icon: Layers },
 };
 
 function normalizeText(value: string) {
@@ -71,14 +70,14 @@ function normalizeText(value: string) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function resolveTypeBucket(typeCode?: string | null, typeName?: string | null): TypeBucket {
+function resolveTypeBucket(typeCode?: string | null, typeName?: string | null): TypeBucket | null {
   const raw = normalizeText(`${typeCode ?? ''} ${typeName ?? ''}`);
   if (raw.includes('ally') || raw.includes('aliado')) return 'ally';
   if (raw.includes('weapon') || raw.includes('arma')) return 'weapon';
   if (raw.includes('totem')) return 'totem';
   if (raw.includes('talisman')) return 'talisman';
   if (raw.includes('gold') || raw.includes('oro')) return 'gold';
-  return 'other';
+  return null;
 }
 
 function resolveCurveBucket(cost: number | null): CurveBucket | null {
@@ -146,10 +145,10 @@ export function DeckDistributionBoard({
       totem: 0,
       talisman: 0,
       gold: 0,
-      other: 0,
     };
     for (const card of normalizedCards) {
       const bucket = resolveTypeBucket(card.typeCode, card.typeName);
+      if (!bucket) continue;
       counts[bucket] += card.qty;
     }
     return counts;
@@ -168,6 +167,8 @@ export function DeckDistributionBoard({
 
     let naCount = 0;
     for (const card of normalizedCards) {
+      // Los oros suelen tener coste 0 y ensucian la curva de coste real.
+      if (resolveTypeBucket(card.typeCode, card.typeName) === 'gold') continue;
       const bucket = resolveCurveBucket(card.cost);
       if (!bucket) {
         naCount += card.qty;
@@ -188,6 +189,14 @@ export function DeckDistributionBoard({
   }, [normalizedCards]);
 
   const maxTypeCount = Math.max(...TYPE_ORDER.map((bucket) => typeCounts[bucket]), 1);
+  const visibleTypeBuckets = TYPE_ORDER.filter((bucket) => typeCounts[bucket] > 0);
+  const visibleCurveBuckets = CURVE_BUCKETS.filter((bucket) => curve.counts[bucket] > 0);
+  const statCards = [
+    { label: 'Total', value: totals.totalCopies },
+    { label: 'Cartas', value: totals.uniqueCards },
+    { label: 'Clave', value: totals.keyCopies },
+    { label: 'Sin coste', value: curve.naCount },
+  ].filter((row) => row.value > 0);
 
   return (
     <section
@@ -218,8 +227,8 @@ export function DeckDistributionBoard({
           <div className="relative flex h-full flex-col p-3 sm:p-4">
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold">Cartas del mazo</span>
-              <Badge variant="outline">{totals.uniqueCards} unicas</Badge>
-              <Badge variant="secondary">{totals.totalCopies} copias</Badge>
+              {totals.uniqueCards > 0 ? <Badge variant="outline">{totals.uniqueCards} unicas</Badge> : null}
+              {totals.totalCopies > 0 ? <Badge variant="secondary">{totals.totalCopies} copias</Badge> : null}
             </div>
 
             {normalizedCards.length === 0 ? (
@@ -257,20 +266,26 @@ export function DeckDistributionBoard({
         </div>
 
         <div className="deck-board-right flex flex-col gap-3 bg-gradient-to-br from-card via-card/90 to-accent/10 p-3 sm:p-4">
-          <div className="grid grid-cols-2 gap-2">
-            <StatCard label="Total" value={totals.totalCopies} />
-            <StatCard label="Cartas" value={totals.uniqueCards} />
-            <StatCard label="Clave" value={totals.keyCopies} />
-            <StatCard label="Sin coste" value={curve.naCount} />
-          </div>
+          {statCards.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2">
+              {statCards.map((row) => (
+                <StatCard key={row.label} label={row.label} value={row.value} />
+              ))}
+            </div>
+          ) : null}
 
           <div className="rounded-xl border border-border/60 bg-surface-2/70 p-3">
             <div className="mb-3 flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-primary" />
               <h2 className="text-sm font-semibold">Curva de coste</h2>
             </div>
-            <div className="grid grid-cols-7 gap-2">
-              {CURVE_BUCKETS.map((bucket) => {
+            {visibleCurveBuckets.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Sin datos de coste (se excluyen cartas de Oro).
+              </p>
+            ) : (
+              <div className="grid grid-cols-7 gap-2">
+                {visibleCurveBuckets.map((bucket) => {
                 const qty = curve.counts[bucket];
                 const heightPct = Math.max(8, Math.round((qty / curve.max) * 100));
                 return (
@@ -285,14 +300,16 @@ export function DeckDistributionBoard({
                     <div className="mt-1 text-[10px] font-semibold text-muted-foreground">{bucket}</div>
                   </div>
                 );
-              })}
-            </div>
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="rounded-xl border border-border/60 bg-surface-2/70 p-3">
-            <h2 className="mb-3 text-sm font-semibold">Distribucion del mazo</h2>
-            <div className="space-y-2">
-              {TYPE_ORDER.map((bucket) => {
+          {visibleTypeBuckets.length > 0 ? (
+            <div className="rounded-xl border border-border/60 bg-surface-2/70 p-3">
+              <h2 className="mb-3 text-sm font-semibold">Distribucion del mazo</h2>
+              <div className="space-y-2">
+                {visibleTypeBuckets.map((bucket) => {
                 const meta = TYPE_META[bucket];
                 const Icon = meta.icon;
                 const qty = typeCounts[bucket];
@@ -311,9 +328,10 @@ export function DeckDistributionBoard({
                     </div>
                   </div>
                 );
-              })}
+                })}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           {keyHighlights.length > 0 ? (
             <div className="rounded-xl border border-border/60 bg-surface-2/70 p-3">

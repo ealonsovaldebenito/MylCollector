@@ -4,6 +4,7 @@
  *
  * Changelog:
  *   2026-02-18 — Creación inicial
+ *   2026-02-18 — Refresh UX/UI: hero contextual, filtros en panel unificado y grid visual de cards enriquecidas.
  */
 
 'use client';
@@ -62,12 +63,14 @@ export function CommunityGallery() {
 
   return (
     <div className="space-y-6 animate-page-enter">
-      {/* Hero header */}
-      <div>
-        <h1 className="font-display text-3xl font-bold tracking-tight">Comunidad</h1>
-        <p className="mt-1 text-muted-foreground">
-          Explora mazos públicos, descubre estrategias y conecta con otros jugadores.
-        </p>
+      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-primary/20 via-card to-card p-6 shadow-sm">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_42%)]" />
+        <div className="relative z-10">
+          <h1 className="font-display text-3xl font-bold tracking-tight">Comunidad</h1>
+          <p className="mt-1 text-muted-foreground">
+            Explora mazos públicos, descubre estrategias y revisa información clave en un vistazo.
+          </p>
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -83,57 +86,58 @@ export function CommunityGallery() {
         </TabsList>
 
         <TabsContent value="gallery" className="mt-6 space-y-4">
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar mazos..."
-                value={search}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
+          <div className="rounded-2xl border border-border/60 bg-card/70 p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar mazos..."
+                  value={search}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
 
-            {!catalogLoading && activeFormats.length > 0 && (
-              <Select value={formatId ?? 'all'} onValueChange={(v) => setFormatId(v === 'all' ? undefined : v)}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Formato" />
+              {!catalogLoading && activeFormats.length > 0 && (
+                <Select value={formatId ?? 'all'} onValueChange={(v) => setFormatId(v === 'all' ? undefined : v)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Formato" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los formatos</SelectItem>
+                    {activeFormats.map((f) => (
+                      <SelectItem key={f.format_id} value={f.format_id}>
+                        {f.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              <Select value={sort} onValueChange={(v) => setSort(v as PublicDeckSort)}>
+                <SelectTrigger className="w-[170px]">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los formatos</SelectItem>
-                  {activeFormats.map((f) => (
-                    <SelectItem key={f.format_id} value={f.format_id}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="newest">Más recientes</SelectItem>
+                  <SelectItem value="most_liked">Más gustados</SelectItem>
+                  <SelectItem value="most_viewed">Más vistos</SelectItem>
                 </SelectContent>
               </Select>
-            )}
 
-            <Select value={sort} onValueChange={(v) => setSort(v as PublicDeckSort)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="newest">Más recientes</SelectItem>
-                <SelectItem value="most_liked">Más gustados</SelectItem>
-                <SelectItem value="most_viewed">Más vistos</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {totalCount > 0 && (
-              <span className="text-xs text-muted-foreground ml-auto">
-                {totalCount} mazo{totalCount !== 1 ? 's' : ''}
-              </span>
-            )}
+              {totalCount > 0 ? (
+                <span className="ml-auto rounded-full border border-border/60 bg-background/60 px-2.5 py-1 text-xs text-muted-foreground">
+                  {totalCount} mazo{totalCount !== 1 ? 's' : ''}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {/* Grid */}
           {isLoading && decks.length === 0 ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-52 rounded-xl" />
+                <Skeleton key={i} className="h-[280px] rounded-xl" />
               ))}
             </div>
           ) : decks.length === 0 ? (
@@ -144,7 +148,7 @@ export function CommunityGallery() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 {decks.map((deck, i) => (
                   <div key={deck.deck_id} className="animate-stagger-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
                     <DeckPublicCard deck={deck} />

@@ -62,6 +62,21 @@ export const publicDeckListItemSchema = z.object({
   updated_at: z.string(),
   total_count: z.number().int(),
   viewer_has_liked: z.boolean().optional(),
+  cardsd: z.object({
+    cover_image_url: z.string().nullable(),
+    avg_cost: z.number().nullable(),
+    total_copies: z.number().int(),
+    unique_cards: z.number().int(),
+    key_cards_count: z.number().int(),
+    race_name: z.string().nullable(),
+    edition_name: z.string().nullable(),
+    key_cards: z.array(z.object({
+      card_printing_id: uuidSchema,
+      name: z.string(),
+      image_url: z.string().nullable(),
+      qty: z.number().int(),
+    })),
+  }).nullable().optional(),
 });
 
 // ============================================================================

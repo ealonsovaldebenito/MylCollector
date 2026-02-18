@@ -4,6 +4,7 @@
  *
  * Changelog:
  *   2026-02-18 — Creación inicial
+ *   2026-02-18 — Enriquecimiento CARDSD para galería: portada, cartas clave, coste promedio, raza y edición.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -13,6 +14,280 @@ import type { PublicDeckFilters } from '@myl/shared';
 import { AppError } from '../api/errors';
 
 type Client = SupabaseClient<Database>;
+
+interface DeckCardsDKeyCard {
+  card_printing_id: string;
+  name: string;
+  image_url: string | null;
+  qty: number;
+}
+
+interface DeckCardsDSummary {
+  cover_image_url: string | null;
+  avg_cost: number | null;
+  total_copies: number;
+  unique_cards: number;
+  key_cards_count: number;
+  race_name: string | null;
+  edition_name: string | null;
+  key_cards: DeckCardsDKeyCard[];
+}
+
+interface DeckListBaseRow {
+  deck_id: string;
+  race_id: string | null;
+  edition_id: string | null;
+  cover_image_url?: string | null;
+}
+
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isGoldType(typeCode?: string | null, typeName?: string | null) {
+  const raw = normalizeText(`${typeCode ?? ''} ${typeName ?? ''}`);
+  return raw.includes('oro') || raw.includes('gold');
+}
+
+function pickMostFrequentId(counts: Map<string, number>): string | null {
+  let bestId: string | null = null;
+  let best = -1;
+  for (const [id, count] of counts.entries()) {
+    if (count > best) {
+      best = count;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
+async function buildDeckCardsDSummaries(
+  supabase: Client,
+  items: DeckListBaseRow[],
+  coverOverrides?: Map<string, string | null>,
+): Promise<Map<string, DeckCardsDSummary>> {
+  const result = new Map<string, DeckCardsDSummary>();
+  if (items.length === 0) return result;
+
+  const deckIds = [...new Set(items.map((item) => item.deck_id))];
+  const itemByDeckId = new Map(items.map((item) => [item.deck_id, item]));
+
+  const { data: versions, error: versionsError } = await supabase
+    .from('deck_versions')
+    .select('deck_id, deck_version_id, version_number')
+    .in('deck_id', deckIds)
+    .order('deck_id', { ascending: true })
+    .order('version_number', { ascending: false });
+
+  if (versionsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar versiones de mazo para CARDSD', { error: versionsError });
+  }
+
+  const latestByDeck = new Map<string, string>();
+  for (const row of versions ?? []) {
+    if (!latestByDeck.has(row.deck_id)) {
+      latestByDeck.set(row.deck_id, row.deck_version_id);
+    }
+  }
+
+  const versionIds = [...new Set(latestByDeck.values())];
+  if (versionIds.length === 0) return result;
+
+  const { data: versionCards, error: versionCardsError } = await supabase
+    .from('deck_version_cards')
+    .select('deck_version_id, card_printing_id, qty, is_key_card, is_starting_gold')
+    .in('deck_version_id', versionIds);
+
+  if (versionCardsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar cartas de versión para CARDSD', { error: versionCardsError });
+  }
+
+  const printingIds = [...new Set((versionCards ?? []).map((row) => row.card_printing_id))];
+  const { data: printings, error: printingsError } = printingIds.length > 0
+    ? await supabase
+      .from('card_printings')
+      .select('card_printing_id, card_id, image_url, edition_id')
+      .in('card_printing_id', printingIds)
+    : { data: [], error: null };
+
+  if (printingsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar impresiones para CARDSD', { error: printingsError });
+  }
+
+  const printingById = new Map((printings ?? []).map((row) => [row.card_printing_id, row]));
+  const cardIds = [...new Set((printings ?? []).map((row) => row.card_id))];
+
+  const { data: cards, error: cardsError } = cardIds.length > 0
+    ? await supabase
+      .from('cards')
+      .select('card_id, name, cost, race_id, card_type_id')
+      .in('card_id', cardIds)
+    : { data: [], error: null };
+
+  if (cardsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar cartas para CARDSD', { error: cardsError });
+  }
+
+  const cardById = new Map((cards ?? []).map((row) => [row.card_id, row]));
+  const cardTypeIds = [...new Set((cards ?? []).map((row) => row.card_type_id).filter(Boolean) as string[])];
+  const { data: cardTypes, error: cardTypesError } = cardTypeIds.length > 0
+    ? await supabase
+      .from('card_types')
+      .select('card_type_id, name, code')
+      .in('card_type_id', cardTypeIds)
+    : { data: [], error: null };
+  if (cardTypesError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar tipos de carta para CARDSD', { error: cardTypesError });
+  }
+  const cardTypeById = new Map((cardTypes ?? []).map((row) => [row.card_type_id, row]));
+  const deckIdByVersionId = new Map<string, string>(
+    [...latestByDeck.entries()].map(([deckId, versionId]) => [versionId, deckId]),
+  );
+
+  const editionVotesByDeck = new Map<string, Map<string, number>>();
+  const raceVotesByDeck = new Map<string, Map<string, number>>();
+  const keyCardsByDeck = new Map<string, Map<string, DeckCardsDKeyCard>>();
+  const featuredCardsByDeck = new Map<string, Map<string, DeckCardsDKeyCard>>();
+  const coverByDeck = new Map<string, string | null>();
+  const totalsByDeck = new Map<string, {
+    totalCopies: number;
+    uniqueCards: number;
+    costSum: number;
+    costCount: number;
+  }>();
+
+  for (const deckId of deckIds) {
+    editionVotesByDeck.set(deckId, new Map());
+    raceVotesByDeck.set(deckId, new Map());
+    keyCardsByDeck.set(deckId, new Map());
+    featuredCardsByDeck.set(deckId, new Map());
+    coverByDeck.set(deckId, coverOverrides?.get(deckId) ?? itemByDeckId.get(deckId)?.cover_image_url ?? null);
+    totalsByDeck.set(deckId, { totalCopies: 0, uniqueCards: 0, costSum: 0, costCount: 0 });
+  }
+
+  for (const row of versionCards ?? []) {
+    const deckId = deckIdByVersionId.get(row.deck_version_id);
+    if (!deckId) continue;
+
+    const qty = Math.max(0, row.qty ?? 0);
+    if (qty <= 0) continue;
+
+    const totals = totalsByDeck.get(deckId);
+    if (!totals) continue;
+    totals.totalCopies += qty;
+    totals.uniqueCards += 1;
+
+    const printing = printingById.get(row.card_printing_id);
+    const card = printing ? cardById.get(printing.card_id) : null;
+
+    if (!coverByDeck.get(deckId) && printing?.image_url) {
+      coverByDeck.set(deckId, printing.image_url);
+    }
+
+    const cardType = card?.card_type_id ? cardTypeById.get(card.card_type_id) : null;
+    if (!row.is_starting_gold && !isGoldType(cardType?.code, cardType?.name)) {
+      if (typeof card?.cost === 'number' && Number.isFinite(card.cost) && card.cost > 0) {
+        totals.costSum += card.cost * qty;
+        totals.costCount += qty;
+      }
+    }
+
+    if (printing?.edition_id) {
+      const counts = editionVotesByDeck.get(deckId)!;
+      counts.set(printing.edition_id, (counts.get(printing.edition_id) ?? 0) + qty);
+    }
+    if (card?.race_id) {
+      const counts = raceVotesByDeck.get(deckId)!;
+      counts.set(card.race_id, (counts.get(card.race_id) ?? 0) + qty);
+    }
+
+    const targetMap = row.is_key_card ? keyCardsByDeck.get(deckId)! : featuredCardsByDeck.get(deckId)!;
+    const existing = targetMap.get(row.card_printing_id);
+    const cardName = card?.name ?? 'Carta';
+    if (existing) {
+      existing.qty += qty;
+    } else {
+      targetMap.set(row.card_printing_id, {
+        card_printing_id: row.card_printing_id,
+        name: cardName,
+        image_url: printing?.image_url ?? null,
+        qty,
+      });
+    }
+  }
+
+  const baseEditionIds = [...new Set(items.map((item) => item.edition_id).filter(Boolean) as string[])];
+  const votedEditionIds = [...new Set(
+    [...editionVotesByDeck.values()].flatMap((map) => [...map.keys()]),
+  )];
+  const editionIds = [...new Set([...baseEditionIds, ...votedEditionIds])];
+
+  const baseRaceIds = [...new Set(items.map((item) => item.race_id).filter(Boolean) as string[])];
+  const votedRaceIds = [...new Set(
+    [...raceVotesByDeck.values()].flatMap((map) => [...map.keys()]),
+  )];
+  const raceIds = [...new Set([...baseRaceIds, ...votedRaceIds])];
+
+  const { data: editions, error: editionsError } = editionIds.length > 0
+    ? await supabase
+      .from('editions')
+      .select('edition_id, name, code')
+      .in('edition_id', editionIds)
+    : { data: [], error: null };
+  if (editionsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar ediciones para CARDSD', { error: editionsError });
+  }
+
+  const { data: races, error: racesError } = raceIds.length > 0
+    ? await supabase
+      .from('races')
+      .select('race_id, name')
+      .in('race_id', raceIds)
+    : { data: [], error: null };
+  if (racesError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar razas para CARDSD', { error: racesError });
+  }
+
+  const editionById = new Map((editions ?? []).map((row) => [row.edition_id, row]));
+  const raceById = new Map((races ?? []).map((row) => [row.race_id, row]));
+
+  for (const deckId of deckIds) {
+    const base = itemByDeckId.get(deckId);
+    const totals = totalsByDeck.get(deckId)!;
+    const keyMap = keyCardsByDeck.get(deckId)!;
+    const featuredMap = featuredCardsByDeck.get(deckId)!;
+    const selectedCards = keyMap.size > 0 ? keyMap : featuredMap;
+    const keyCards = [...selectedCards.values()]
+      .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name, 'es'))
+      .slice(0, 4);
+
+    const votedRaceId = pickMostFrequentId(raceVotesByDeck.get(deckId)!);
+    const votedEditionId = pickMostFrequentId(editionVotesByDeck.get(deckId)!);
+    const raceId = base?.race_id ?? votedRaceId;
+    const editionId = base?.edition_id ?? votedEditionId;
+
+    const avgCost = totals.costCount > 0
+      ? Number((totals.costSum / totals.costCount).toFixed(2))
+      : null;
+
+    const coverImage = coverByDeck.get(deckId) ?? keyCards[0]?.image_url ?? null;
+    result.set(deckId, {
+      cover_image_url: coverImage,
+      avg_cost: avgCost,
+      total_copies: totals.totalCopies,
+      unique_cards: totals.uniqueCards,
+      key_cards_count: keyMap.size,
+      race_name: raceId ? (raceById.get(raceId)?.name ?? null) : null,
+      edition_name: editionId ? (editionById.get(editionId)?.name ?? null) : null,
+      key_cards: keyCards,
+    });
+  }
+
+  return result;
+}
 
 // ============================================================================
 // Public Deck Gallery
@@ -52,10 +327,32 @@ export async function getPublicDecks(
     if (likes) likedDeckIds = new Set(likes.map((l) => l.deck_id));
   }
 
+  const deckIds = items.map((item: Record<string, unknown>) => item.deck_id as string);
+  const { data: deckCovers, error: deckCoverError } = await supabase
+    .from('decks')
+    .select('deck_id, cover_image_url')
+    .in('deck_id', deckIds);
+  if (deckCoverError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar portada de mazos para CARDSD', { error: deckCoverError });
+  }
+  const coverMap = new Map((deckCovers ?? []).map((row) => [row.deck_id, row.cover_image_url ?? null]));
+
+  const cardsdByDeckId = await buildDeckCardsDSummaries(
+    supabase,
+    items.map((item: Record<string, unknown>) => ({
+      deck_id: item.deck_id as string,
+      race_id: (item.race_id as string | null) ?? null,
+      edition_id: (item.edition_id as string | null) ?? null,
+      cover_image_url: coverMap.get(item.deck_id as string) ?? null,
+    })),
+    coverMap,
+  );
+
   return {
     items: items.map((d: Record<string, unknown>) => ({
       ...d,
       viewer_has_liked: likedDeckIds.has(d.deck_id as string),
+      cardsd: cardsdByDeckId.get(d.deck_id as string) ?? null,
     })),
     total_count: totalCount,
     has_more: filters.offset + filters.limit < totalCount,
@@ -463,7 +760,34 @@ export async function getTrendingDecks(supabase: Client, limit = 10) {
   });
 
   if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar tendencias', { error });
-  return data ?? [];
+  const items = (data ?? []) as Record<string, unknown>[];
+  if (items.length === 0) return [];
+
+  const deckIds = items.map((item) => item.deck_id as string);
+  const { data: deckCovers, error: deckCoverError } = await supabase
+    .from('decks')
+    .select('deck_id, cover_image_url')
+    .in('deck_id', deckIds);
+  if (deckCoverError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al cargar portada de mazos para CARDSD', { error: deckCoverError });
+  }
+  const coverMap = new Map((deckCovers ?? []).map((row) => [row.deck_id, row.cover_image_url ?? null]));
+
+  const cardsdByDeckId = await buildDeckCardsDSummaries(
+    supabase,
+    items.map((item) => ({
+      deck_id: item.deck_id as string,
+      race_id: (item.race_id as string | null) ?? null,
+      edition_id: (item.edition_id as string | null) ?? null,
+      cover_image_url: coverMap.get(item.deck_id as string) ?? null,
+    })),
+    coverMap,
+  );
+
+  return items.map((item) => ({
+    ...item,
+    cardsd: cardsdByDeckId.get(item.deck_id as string) ?? null,
+  }));
 }
 
 export async function getTopBuilders(supabase: Client, limit = 10) {

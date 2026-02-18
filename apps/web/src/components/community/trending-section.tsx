@@ -3,6 +3,7 @@
  *
  * Changelog:
  *   2026-02-18 — Creación inicial
+ *   2026-02-18 — Ajuste visual: grid y alturas alineadas con cards enriquecidas de comunidad.
  */
 
 'use client';
@@ -27,9 +28,9 @@ export function TrendingSection() {
           Mazos Populares
         </h2>
         {isLoading ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
             {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-48 rounded-xl" />
+              <Skeleton key={i} className="h-[280px] rounded-xl" />
             ))}
           </div>
         ) : trendingDecks.length === 0 ? (
@@ -38,7 +39,7 @@ export function TrendingSection() {
             <p className="text-sm">Aún no hay mazos populares</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
             {trendingDecks.slice(0, 6).map((deck, i) => (
               <div key={deck.deck_id} className="animate-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
                 <DeckPublicCard deck={deck} />
