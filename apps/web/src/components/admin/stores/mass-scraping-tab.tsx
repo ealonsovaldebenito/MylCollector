@@ -21,6 +21,8 @@
  * - 2026-02-18 - Replaced assignment modal with inline editor per row for faster workflow.
  * - 2026-02-18 - Added inline custom reprint-name input for manual variant naming.
  * - 2026-02-18 - Bulk import now reports per-item progress and executes price scrape per item.
+ * - 2026-02-18 - Assignment UX: visual printing picker with image previews + assigned-printing thumbnail in linear queue.
+ * - 2026-02-18 - Import diagnostics: explicit per-row error reasons (API/timeout/network) + timeout tuned for run_scrape.
  *
  * Bugfix notes:
  * - Keeps current stores page flow untouched by running as an isolated tab component.
@@ -131,6 +133,8 @@ interface Assignment {
   card_printing_id: string;
   card_name: string;
   edition_name: string;
+  printing_variant?: string | null;
+  printing_image_url?: string | null;
 }
 
 interface ImportProgressState {
@@ -140,6 +144,14 @@ interface ImportProgressState {
   duplicates: number;
   errors: number;
   current_label: string;
+}
+
+interface ImportIssue {
+  candidate_id: string | null;
+  store_id: string;
+  product_url: string;
+  label: string;
+  reason: string;
 }
 
 interface ScrapePreviewData {
@@ -329,6 +341,7 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
   const [importLoading, setImportLoading] = useState(false);
   const [importAlert, setImportAlert] = useState<{ variant: 'success' | 'warning' | 'error'; title: string; description?: string } | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
   const searchCacheRef = useRef<Map<string, CardSearchResult[]>>(new Map());
   const printingsCacheRef = useRef<Map<string, PrintingOption[]>>(new Map());
 
@@ -687,6 +700,8 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
           card_printing_id: resolvedPrintingId,
           card_name: selectedCard.card.name,
           edition_name: resolvedPrinting?.edition?.name ?? selectedCard.edition.name,
+          printing_variant: resolvedPrinting?.printing_variant ?? selectedCard.printing_variant ?? null,
+          printing_image_url: resolvedPrinting?.image_url ?? selectedCard.image_url ?? null,
         },
       }));
 
@@ -780,6 +795,7 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
 
     setImportLoading(true);
     setImportAlert(null);
+    setImportIssues([]);
     setImportProgress({
       total: ready.length,
       done: 0,
@@ -794,6 +810,7 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
       let created = 0;
       let duplicates = 0;
       let errors = 0;
+      const issues: ImportIssue[] = [];
 
       for (let idx = 0; idx < ready.length; idx += 1) {
         const row = ready[idx]!;
@@ -804,7 +821,7 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
         } : prev);
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 45_000);
+        const timeout = setTimeout(() => controller.abort(), 120_000);
         try {
           const res = await fetch('/api/v1/admin/stores/bulk/import', {
             method: 'POST',
@@ -816,10 +833,19 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
 
           if (!json.ok) {
             errors += 1;
+            const reason = json.error?.message ?? `Error HTTP ${res.status}`;
+            issues.push({
+              candidate_id: row.candidate_id ?? null,
+              store_id: row.store_id,
+              product_url: row.product_url,
+              label,
+              reason,
+            });
           } else {
             const result = (json.data?.results?.[0] ?? null) as {
               candidate_id?: string | null;
               status?: 'created' | 'skipped_duplicate' | 'error';
+              message?: string | null;
             } | null;
 
             if (result?.status === 'created') {
@@ -830,10 +856,29 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
               if (result.candidate_id) removable.add(result.candidate_id);
             } else {
               errors += 1;
+              issues.push({
+                candidate_id: row.candidate_id ?? null,
+                store_id: row.store_id,
+                product_url: row.product_url,
+                label,
+                reason: result?.message ?? 'Error sin detalle en importacion de fila',
+              });
             }
           }
-        } catch {
+        } catch (error) {
           errors += 1;
+          const reason = error instanceof Error
+            ? (error.name === 'AbortError'
+              ? 'Timeout de 120s al importar/scrapear esta fila'
+              : error.message)
+            : 'Error de red al importar esta fila';
+          issues.push({
+            candidate_id: row.candidate_id ?? null,
+            store_id: row.store_id,
+            product_url: row.product_url,
+            label,
+            reason,
+          });
         } finally {
           clearTimeout(timeout);
         }
@@ -846,6 +891,8 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
           errors,
         } : prev);
       }
+
+      setImportIssues(issues);
 
       if (removable.size > 0) {
         setItems((prev) => prev.filter((item) => !removable.has(item.candidate_id)));
@@ -864,6 +911,9 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
       setImportAlert({
         variant: errors > 0 ? 'warning' : 'success',
         title: `Lote importado: ${created} creados, ${duplicates} duplicados, ${errors} con error.`,
+        description: errors > 0
+          ? 'Revisa "Detalle de errores" para ver el motivo exacto por cada URL.'
+          : undefined,
       });
     } catch {
       setImportAlert({
@@ -1001,6 +1051,21 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
           description={importAlert.description}
           onClose={() => setImportAlert(null)}
         />
+      ) : null}
+
+      {importIssues.length > 0 ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+          <p className="text-sm font-semibold text-destructive">Detalle de errores ({importIssues.length})</p>
+          <div className="max-h-52 space-y-2 overflow-y-auto">
+            {importIssues.map((issue, index) => (
+              <div key={`${issue.candidate_id ?? issue.product_url}-${index}`} className="rounded-md border border-destructive/30 bg-background/70 p-2">
+                <p className="truncate text-xs font-medium">{issue.label}</p>
+                <p className="truncate text-[11px] text-muted-foreground">{issue.product_url}</p>
+                <p className="mt-1 text-xs text-destructive">{issue.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       {importProgress ? (
@@ -1258,9 +1323,21 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
                     {isEditing ? 'Cerrar editor' : assignment ? 'Cambiar asociacion' : 'Asociar carta/impresion'}
                   </Button>
                   {assignment ? (
-                    <p className="text-xs text-muted-foreground">
-                      {assignment.card_name} · {assignment.edition_name}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-7 flex-shrink-0 overflow-hidden rounded border border-border/60 bg-muted/20">
+                        {assignment.printing_image_url ? (
+                          <img src={assignment.printing_image_url} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
+                            Sin foto
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {assignment.card_name} · {assignment.edition_name}
+                        {assignment.printing_variant ? ` · ${assignment.printing_variant}` : ''}
+                      </p>
+                    </div>
                   ) : null}
                 </div>
 
@@ -1319,25 +1396,52 @@ export function MassScrapingTab({ stores }: MassScrapingTabProps) {
 
                           {loadingPrintings ? (
                             <p className="text-xs text-muted-foreground">Cargando impresiones...</p>
+                          ) : printings.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No hay impresiones para esta carta.</p>
                           ) : (
-                            <Select
-                              value={selectedPrintingId ?? '__none__'}
-                              onValueChange={(value) => setSelectedPrintingId(value === '__none__' ? null : value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Selecciona impresion" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">Sin seleccionar</SelectItem>
-                                {printings.map((printing) => (
-                                  <SelectItem key={printing.card_printing_id} value={printing.card_printing_id}>
-                                    {printing.edition.name}
-                                    {printing.collector_number ? ` · #${printing.collector_number}` : ''}
-                                    {printing.printing_variant ? ` · ${printing.printing_variant}` : ''}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <div className="max-h-60 space-y-2 overflow-y-auto rounded-md border border-border/60 bg-background p-2">
+                              {printings.map((printing) => {
+                                const isSelected = selectedPrintingId === printing.card_printing_id;
+                                return (
+                                  <label
+                                    key={printing.card_printing_id}
+                                    className={`flex cursor-pointer items-center gap-3 rounded-md border px-2 py-2 text-sm transition-colors ${
+                                      isSelected ? 'border-primary bg-primary/5' : 'border-border/50 hover:border-border'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="mass-scraping-selected-printing"
+                                      checked={isSelected}
+                                      onChange={() => setSelectedPrintingId(printing.card_printing_id)}
+                                    />
+                                    <div className="h-12 w-8 flex-shrink-0 overflow-hidden rounded border border-border/60 bg-muted/20">
+                                      {printing.image_url ? (
+                                        <img src={printing.image_url} alt="" className="h-full w-full object-cover" />
+                                      ) : (
+                                        <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
+                                          Sin foto
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-xs font-medium">
+                                        {printing.edition.name}
+                                        {printing.rarity_tier?.name ? ` · ${printing.rarity_tier.name}` : ''}
+                                      </p>
+                                      <p className="truncate text-[11px] text-muted-foreground">
+                                        {printing.collector_number ? `#${printing.collector_number}` : ''}
+                                        {printing.collector_number && printing.printing_variant ? ' · ' : ''}
+                                        {printing.printing_variant ?? 'standard'}
+                                      </p>
+                                    </div>
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {printing.legal_status}
+                                    </Badge>
+                                  </label>
+                                );
+                              })}
+                            </div>
                           )}
 
                           <label className="flex items-start gap-2 rounded-md border border-border/50 bg-background px-2 py-2">
