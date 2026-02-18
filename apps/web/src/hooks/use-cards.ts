@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import type { CardFilters } from '@myl/shared';
 
 interface CardItem {
@@ -72,13 +72,18 @@ export function useCards(filters: Partial<CardFilters>): UseCardsResult {
   const [total, setTotal] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Normaliza el objeto de filtros para evitar renders infinitos cuando
+  // el caller pasa literales nuevos en cada render (especialmente en producción).
+  const filterKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const stableFilters = useMemo(() => (filters ? { ...filters } : {}), [filterKey]);
+
   const fetchCards = useCallback(
     async (cursor?: string) => {
       setIsLoading(true);
       setError(null);
 
       try {
-        const qs = buildQueryString(filters, cursor);
+        const qs = buildQueryString(stableFilters, cursor);
         const res = await fetch(`/api/v1/cards?${qs}`);
         const json = await res.json();
 
@@ -101,7 +106,7 @@ export function useCards(filters: Partial<CardFilters>): UseCardsResult {
         setIsLoading(false);
       }
     },
-    [filters],
+    [stableFilters],
   );
 
   // Debounce search text, immediate for other filters

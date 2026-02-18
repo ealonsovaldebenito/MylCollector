@@ -8,10 +8,13 @@
 
 'use client';
 
-import { ArrowLeft, Heart, Users, ScrollText, UserPlus, UserMinus } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ArrowLeft, Heart, Users, ScrollText, UserPlus, UserMinus, Calendar, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { useUserPublicProfile } from '@/hooks/use-user-public-profile';
 import { usePublicDecks } from '@/hooks/use-public-decks';
 import { useUser } from '@/contexts/user-context';
@@ -64,82 +67,98 @@ export function UserPublicProfile({ userId }: { userId: string }) {
   const isOwnProfile = user?.id === userId;
 
   return (
-    <div className="space-y-6 animate-page-enter">
-      <Link href="/community">
-        <Button variant="ghost" size="sm">
-          <ArrowLeft className="h-4 w-4 mr-1" /> Comunidad
-        </Button>
-      </Link>
-
-      {/* Profile header */}
-      <div className="rounded-xl border border-border/50 bg-card/80 p-6 backdrop-blur-sm">
-        <div className="flex flex-wrap items-center gap-5">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-white shadow-lg shadow-indigo-500/20">
-            {(profile.display_name || 'U').charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1">
-            <h1 className="font-display text-2xl font-bold">
-              {profile.display_name || 'Usuario'}
-            </h1>
-            {profile.bio && (
-              <p className="mt-1 text-sm text-muted-foreground">{profile.bio}</p>
+    <div className="space-y-8 animate-page-enter">
+      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-slate-950/80 via-background to-background shadow-lg">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(99,102,241,0.15),transparent_45%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_0%,rgba(236,72,153,0.12),transparent_40%)]" />
+        <div className="relative z-10 flex flex-col gap-4 p-6 lg:p-8">
+          <div className="flex items-center justify-between gap-3">
+            <Link href="/community">
+              <Button variant="ghost" size="sm" className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Comunidad
+              </Button>
+            </Link>
+            {!isOwnProfile && user && (
+              <Button
+                variant={isFollowing ? 'outline' : 'default'}
+                size="sm"
+                onClick={handleFollow}
+                disabled={isTogglingFollow}
+                className="gap-2"
+              >
+                {isFollowing ? (
+                  <>
+                    <UserMinus className="h-4 w-4" />
+                    Siguiendo
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="h-4 w-4" />
+                    Seguir
+                  </>
+                )}
+              </Button>
             )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              Miembro desde {new Date(profile.created_at).toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })}
-            </p>
           </div>
-          {!isOwnProfile && user && (
-            <Button
-              variant={isFollowing ? 'outline' : 'default'}
-              size="sm"
-              onClick={handleFollow}
-              disabled={isTogglingFollow}
-            >
-              {isFollowing ? (
-                <><UserMinus className="h-4 w-4 mr-1.5" /> Siguiendo</>
-              ) : (
-                <><UserPlus className="h-4 w-4 mr-1.5" /> Seguir</>
-              )}
-            </Button>
-          )}
-        </div>
 
-        {/* Stats */}
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-lg bg-muted/40 py-3 text-center">
-            <ScrollText className="h-4 w-4 mx-auto mb-1 text-accent" />
-            <p className="text-xl font-bold">{profile.deck_count}</p>
-            <p className="text-[10px] text-muted-foreground">Mazos</p>
+          <div className="flex flex-wrap items-center gap-5">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-white shadow-lg shadow-indigo-500/20">
+              {(profile.display_name || 'U').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="font-display text-3xl font-bold leading-tight">
+                  {profile.display_name || 'Usuario'}
+                </h1>
+                <Badge variant="secondary" className="text-[11px] uppercase tracking-wider">
+                  Comunidad
+                </Badge>
+              </div>
+              {profile.bio ? (
+                <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{profile.bio}</p>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">Aún no tiene biografía.</p>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <Calendar className="h-3.5 w-3.5" />
+                  Miembro desde {new Date(profile.created_at).toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })}
+                </span>
+                <Separator orientation="vertical" className="h-4" />
+                <span className="inline-flex items-center gap-1">
+                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  Builder destacado
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="rounded-lg bg-muted/40 py-3 text-center">
-            <Heart className="h-4 w-4 mx-auto mb-1 text-red-500" />
-            <p className="text-xl font-bold">{profile.total_likes}</p>
-            <p className="text-[10px] text-muted-foreground">Likes</p>
-          </div>
-          <div className="rounded-lg bg-muted/40 py-3 text-center">
-            <Users className="h-4 w-4 mx-auto mb-1 text-indigo-500" />
-            <p className="text-xl font-bold">{profile.follower_count}</p>
-            <p className="text-[10px] text-muted-foreground">Seguidores</p>
-          </div>
-          <div className="rounded-lg bg-muted/40 py-3 text-center">
-            <Users className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-            <p className="text-xl font-bold">{profile.following_count}</p>
-            <p className="text-[10px] text-muted-foreground">Siguiendo</p>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile icon={<ScrollText className="h-4 w-4 text-accent" />} label="Mazos" value={profile.deck_count} />
+            <StatTile icon={<Heart className="h-4 w-4 text-red-500" />} label="Likes recibidos" value={profile.total_likes} />
+            <StatTile icon={<Users className="h-4 w-4 text-indigo-500" />} label="Seguidores" value={profile.follower_count} />
+            <StatTile icon={<Users className="h-4 w-4 text-muted-foreground" />} label="Siguiendo" value={profile.following_count} />
           </div>
         </div>
       </div>
 
       {/* User's public decks */}
-      <div>
-        <h2 className="font-display text-lg font-bold mb-4">Mazos Públicos</h2>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-semibold">Mazos públicos</h2>
+          <Badge variant="outline" className="text-[11px]">
+            {userDecks.length} resultados
+          </Badge>
+        </div>
         {decksLoading ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3].map((i) => <Skeleton key={i} className="h-48 rounded-xl" />)}
           </div>
         ) : userDecks.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-border/60 bg-card/60 py-12 text-muted-foreground">
             <ScrollText className="h-10 w-10 opacity-30" />
-            <p className="text-sm">Este usuario no tiene mazos públicos</p>
+            <p className="text-sm">Este usuario no tiene mazos públicos.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -149,6 +168,18 @@ export function UserPublicProfile({ userId }: { userId: string }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function StatTile({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-3 text-center backdrop-blur">
+      <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-muted/60">
+        {icon}
+      </div>
+      <p className="text-lg font-bold">{value}</p>
+      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
     </div>
   );
 }
