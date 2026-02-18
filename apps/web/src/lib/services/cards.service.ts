@@ -5,11 +5,69 @@ import type { CardFilters, CreateCard, UpdateCard, CreateCardPrinting, UpdateCar
 import { AppError } from '../api/errors';
 
 /**
- * Cards service — search, CRUD, printings.
+ * Cards service - search, CRUD, printings.
  * Doc reference: 11_API_CONTRACTS.md, 03_DATA_MODEL_SQL.md
+ *
+ * Changelog:
+ *   2026-02-18 - Admin printing delete hardening: cleanup derived refs + clear conflict errors.
+ *   2026-02-18 - Printing mutations now support optional card ownership guard (card_id).
  */
 
 type Client = SupabaseClient<Database>;
+
+type PrintingMutationOptions = {
+  cardId?: string;
+};
+
+type PrintingReferenceRule = {
+  table: string;
+  label: string;
+  mode: 'block' | 'cleanup';
+};
+
+// Keep this list explicit so admin delete stays predictable and auditable.
+const PRINTING_REFERENCE_RULES: PrintingReferenceRule[] = [
+  { table: 'deck_version_cards', label: 'mazos', mode: 'block' },
+  { table: 'user_cards', label: 'colecciones de usuario', mode: 'block' },
+  { table: 'public_deck_cards', label: 'mazos publicos', mode: 'block' },
+  { table: 'store_printing_links', label: 'vinculos de tiendas', mode: 'cleanup' },
+  { table: 'card_price_consensus', label: 'consenso de precios', mode: 'cleanup' },
+  { table: 'card_prices', label: 'historial de precios', mode: 'cleanup' },
+  { table: 'scrape_job_items', label: 'historial de scraping', mode: 'cleanup' },
+  { table: 'community_price_submissions', label: 'propuestas de precio', mode: 'cleanup' },
+  { table: 'link_suggestions', label: 'sugerencias de links', mode: 'cleanup' },
+];
+
+async function countPrintingReferences(
+  supabase: Client,
+  table: string,
+  printingId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from(table as never)
+    .select('card_printing_id', { head: true, count: 'exact' })
+    .eq('card_printing_id', printingId);
+
+  // Some deployments may not include legacy/optional tables.
+  if (error?.code === '42P01') return 0;
+  if (error) throw error;
+
+  return count ?? 0;
+}
+
+async function cleanupPrintingReferences(
+  supabase: Client,
+  table: string,
+  printingId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from(table as never)
+    .delete()
+    .eq('card_printing_id', printingId);
+
+  if (error?.code === '42P01') return;
+  if (error) throw error;
+}
 
 /**
  * Normalize card name for search: lowercase, trim, remove accents.
@@ -443,13 +501,14 @@ export async function updateCardPrinting(
   supabase: Client,
   printingId: string,
   input: UpdateCardPrinting,
+  options?: PrintingMutationOptions,
 ) {
-  const { data, error } = await supabase
-    .from('card_printings')
-    .update(input)
-    .eq('card_printing_id', printingId)
-    .select()
-    .single();
+  let query = supabase.from('card_printings').update(input).eq('card_printing_id', printingId);
+  if (options?.cardId) {
+    query = query.eq('card_id', options.cardId);
+  }
+
+  const { data, error } = await query.select().maybeSingle();
 
   if (error) throw error;
   if (!data) throw new AppError('NOT_FOUND', `Printing no encontrado: ${printingId}`);
@@ -459,9 +518,71 @@ export async function updateCardPrinting(
 /**
  * Delete a card printing.
  */
-export async function deleteCardPrinting(supabase: Client, printingId: string) {
-  const { error } = await supabase.from('card_printings').delete().eq('card_printing_id', printingId);
-  if (error) throw error;
+export async function deleteCardPrinting(
+  supabase: Client,
+  printingId: string,
+  options?: PrintingMutationOptions,
+) {
+  let existsQuery = supabase
+    .from('card_printings')
+    .select('card_printing_id', { head: true, count: 'exact' })
+    .eq('card_printing_id', printingId);
+  if (options?.cardId) {
+    existsQuery = existsQuery.eq('card_id', options.cardId);
+  }
+
+  const { count: existingCount, error: existsError } = await existsQuery;
+  if (existsError) throw existsError;
+  if (!existingCount) {
+    throw new AppError('NOT_FOUND', `Printing no encontrado: ${printingId}`);
+  }
+
+  const blockers = PRINTING_REFERENCE_RULES.filter((rule) => rule.mode === 'block');
+  const blockerCounts = await Promise.all(
+    blockers.map(async (rule) => ({
+      ...rule,
+      count: await countPrintingReferences(supabase, rule.table, printingId),
+    })),
+  );
+
+  const blockingUsage = blockerCounts.filter((rule) => rule.count > 0);
+  if (blockingUsage.length > 0) {
+    throw new AppError(
+      'CONFLICT',
+      'No se puede eliminar la impresion porque esta vinculada a datos activos (mazos o colecciones).',
+      {
+        references: blockingUsage.map((rule) => ({
+          table: rule.table,
+          label: rule.label,
+          count: rule.count,
+        })),
+      },
+    );
+  }
+
+  const cleanupRules = PRINTING_REFERENCE_RULES.filter((rule) => rule.mode === 'cleanup');
+  for (const rule of cleanupRules) {
+    await cleanupPrintingReferences(supabase, rule.table, printingId);
+  }
+
+  let deleteQuery = supabase.from('card_printings').delete().eq('card_printing_id', printingId);
+  if (options?.cardId) {
+    deleteQuery = deleteQuery.eq('card_id', options.cardId);
+  }
+
+  const { error } = await deleteQuery;
+  if (!error) return;
+
+  // Fallback for any remaining FK dependencies not covered above.
+  if (error.code === '23503') {
+    throw new AppError(
+      'CONFLICT',
+      'No se puede eliminar la impresion porque todavia tiene registros relacionados.',
+      { postgres_error: error.message },
+    );
+  }
+
+  throw error;
 }
 
 /**

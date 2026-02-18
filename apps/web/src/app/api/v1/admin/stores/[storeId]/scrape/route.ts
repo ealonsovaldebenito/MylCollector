@@ -4,6 +4,7 @@
  * GET  /api/v1/admin/stores/:storeId/scrape — get job history
  *
  * Changelog:
+ *   2026-02-19 — Scope `single` ejecuta solo el link/carta solicitado (sin scrape global).
  *   2026-02-16 — Initial creation
  *   2026-02-16 — POST now triggers AND executes the scrape job
  */
@@ -42,7 +43,7 @@ export const POST = withApiHandler(async (request, { params, requestId }) => {
   const triggerResult = await triggerScrape(adminClient, params.storeId!, parsed.data);
 
   // 2. Execute the scrape job (fetch pages + extract prices)
-  const execResult = await executeScrapeJob(adminClient, triggerResult.job.scrape_job_id);
+  const execResult = await executeScrapeJob(adminClient, triggerResult.job.scrape_job_id, parsed.data);
 
   return createSuccess({
     job: triggerResult.job,

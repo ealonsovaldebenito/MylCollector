@@ -1,19 +1,22 @@
 /**
- * /resources/glossary — Glosario oficial de términos de MYL.
- * Términos, tipos de habilidad, zonas de juego y conceptos clave.
+ * /resources/glossary - Glosario oficial de terminos de MYL.
+ * Terminos, tipos de carta, zonas de juego y mecanicas base.
  *
  * Changelog:
- *   2026-02-16 — Initial creation
+ *   2026-02-16 - Initial creation
+ *   2026-02-18 - Contenido corregido con reglas reales de Mitos y Leyendas.
  */
+
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { BookA, Search } from 'lucide-react';
+import { BookA } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
 export const metadata: Metadata = {
   title: 'Glosario | MYL',
-  description: 'Glosario oficial de términos del juego Mitos y Leyendas',
+  description: 'Glosario oficial de terminos del juego Mitos y Leyendas',
 };
 
 interface GlossaryEntry {
@@ -23,66 +26,290 @@ interface GlossaryEntry {
 }
 
 const CATEGORY_CONFIG = {
-  mecanica: { label: 'Mecánica', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
-  zona: { label: 'Zona', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
-  tipo: { label: 'Tipo', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' },
-  habilidad: { label: 'Habilidad', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' },
-  estado: { label: 'Estado', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
-  general: { label: 'General', className: 'bg-gray-100 text-gray-700 dark:bg-gray-800/40 dark:text-gray-300' },
+  mecanica: {
+    label: 'Mecanica',
+    className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  },
+  zona: {
+    label: 'Zona',
+    className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  },
+  tipo: {
+    label: 'Tipo',
+    className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
+  },
+  habilidad: {
+    label: 'Habilidad',
+    className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  },
+  estado: {
+    label: 'Estado',
+    className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  },
+  general: {
+    label: 'General',
+    className: 'bg-gray-100 text-gray-700 dark:bg-gray-800/40 dark:text-gray-300',
+  },
 } as const;
 
 const GLOSSARY: GlossaryEntry[] = [
   // Tipos de carta
-  { term: 'Aliado', category: 'tipo', definition: 'Carta de criatura que puede atacar y bloquear. Tiene un valor de Fuerza que representa tanto su poder de ataque como sus puntos de vida.' },
-  { term: 'Arma', category: 'tipo', definition: 'Carta que se equipa a un Aliado para aumentar su Fuerza. Un Aliado solo puede tener una Arma equipada.' },
-  { term: 'Oro', category: 'tipo', definition: 'Carta de recurso que se coloca boca abajo en la Zona de Oro. Se gira para pagar costes de otras cartas.' },
-  { term: 'Talismán', category: 'tipo', definition: 'Carta de efecto inmediato que se resuelve y va al Cementerio.' },
-  { term: 'Tótem', category: 'tipo', definition: 'Carta permanente que otorga efectos continuos mientras permanezca en juego.' },
+  {
+    term: 'Aliado',
+    category: 'tipo',
+    definition:
+      'Carta principal de combate. Puede atacar Castillo y bloquear. Tiene Fuerza, Raza y habilidad.',
+  },
+  {
+    term: 'Arma',
+    category: 'tipo',
+    definition:
+      'Carta que se anexa a un Aliado para darle bonos o habilidades. Si el portador sale del juego, el Arma se destruye.',
+  },
+  {
+    term: 'Oro',
+    category: 'tipo',
+    definition:
+      'Recurso para pagar costes. Se juega en Reserva de Oro y al pagar pasa a Oro Pagado.',
+  },
+  {
+    term: 'Talisman',
+    category: 'tipo',
+    definition: 'Carta de efecto inmediato. Al resolverse se envia al Cementerio.',
+  },
+  {
+    term: 'Totem',
+    category: 'tipo',
+    definition:
+      'Carta permanente que modifica el juego mientras permanezca en Linea de Apoyo.',
+  },
 
   // Zonas
-  { term: 'Arena', category: 'zona', definition: 'Zona donde se colocan los Aliados, Armas, Talismanes y Tótems en juego.' },
-  { term: 'Cementerio', category: 'zona', definition: 'Pila de descarte. Las cartas destruidas, descartadas o usadas van aquí.' },
-  { term: 'Exilio', category: 'zona', definition: 'Zona removida del juego. Las cartas exiliadas no pueden ser recuperadas por medios normales.' },
-  { term: 'Mazo', category: 'zona', definition: 'Pila de cartas de donde robas al inicio de cada turno. Funciona como tus puntos de vida.' },
-  { term: 'Mano', category: 'zona', definition: 'Cartas disponibles para jugar. Máximo 7 al final del turno.' },
-  { term: 'Zona de Oro', category: 'zona', definition: 'Lugar donde se colocan boca abajo las cartas de Oro que producen recursos.' },
+  {
+    term: 'Castillo',
+    category: 'zona',
+    definition:
+      'Mazo de 50 cartas que representa tus defensas. Si se queda sin cartas, pierdes la partida.',
+  },
+  {
+    term: 'Cementerio',
+    category: 'zona',
+    definition: 'Zona donde van cartas destruidas, descartadas o botadas desde Castillo.',
+  },
+  {
+    term: 'Destierro',
+    category: 'zona',
+    definition: 'Zona fuera de juego. Normalmente no se recuperan cartas desde aqui.',
+  },
+  {
+    term: 'Linea de Apoyo',
+    category: 'zona',
+    definition: 'Zona donde entran y permanecen los Totem.',
+  },
+  {
+    term: 'Linea de Ataque',
+    category: 'zona',
+    definition:
+      'Zona a la que se mueven tus Aliados al atacar. Mientras estan aqui, no pueden bloquear.',
+  },
+  {
+    term: 'Linea de Defensa',
+    category: 'zona',
+    definition: 'Zona base de tus Aliados. Desde aqui se declaran bloqueadores.',
+  },
+  {
+    term: 'Mano',
+    category: 'zona',
+    definition: 'Cartas disponibles para jugar. El maximo al finalizar turno es 8.',
+  },
+  {
+    term: 'Oro Pagado',
+    category: 'zona',
+    definition: 'Zona temporal donde quedan los Oros usados para pagar costes.',
+  },
+  {
+    term: 'Reserva de Oro',
+    category: 'zona',
+    definition: 'Zona de Oros disponibles para pagar cartas y habilidades.',
+  },
 
   // Habilidades
-  { term: 'Habilidad Activada', category: 'habilidad', definition: 'Habilidad que requiere un coste para activarse (girar, pagar oro, descartar). Se activa cuando el jugador decide usarla.' },
-  { term: 'Habilidad Pasiva', category: 'habilidad', definition: 'Habilidad que está siempre activa mientras la carta esté en juego. No requiere activación.' },
-  { term: 'Habilidad Especial', category: 'habilidad', definition: 'Habilidad con condiciones o restricciones únicas que no encajan en las categorías estándar.' },
-  { term: 'Habilidad Continua', category: 'habilidad', definition: 'Efecto permanente que modifica el estado del juego mientras la fuente esté en juego.' },
-  { term: 'Habilidad Disparada', category: 'habilidad', definition: 'Habilidad que se activa automáticamente cuando ocurre un evento específico (al entrar en juego, al ser destruido, etc.).' },
+  {
+    term: 'Habilidad',
+    category: 'habilidad',
+    definition:
+      'Texto de efecto de la carta. Puede requerir condiciones, objetivos o pago de costes.',
+  },
+  {
+    term: 'Habilidad Avanzada',
+    category: 'habilidad',
+    definition:
+      'Texto complementario para juego mas experto, adicional a la habilidad inicial.',
+  },
+  {
+    term: 'Habilidad Inicial',
+    category: 'habilidad',
+    definition: 'Texto simplificado para facilitar aprendizaje en partidas introductorias.',
+  },
+  {
+    term: 'Imbloqueable',
+    category: 'habilidad',
+    definition: 'Ese Aliado no puede ser bloqueado.',
+  },
+  {
+    term: 'Indesterrable',
+    category: 'habilidad',
+    definition: 'Esa carta no puede ser desterrada mientras este en juego.',
+  },
+  {
+    term: 'Indestructible',
+    category: 'habilidad',
+    definition: 'Esa carta no puede ser destruida mientras este en juego.',
+  },
 
-  // Mecánicas
-  { term: 'Atacar', category: 'mecanica', definition: 'Girar un Aliado para infligir daño al oponente o a un Aliado bloqueador. Solo durante la Fase de Ataque.' },
-  { term: 'Bloquear', category: 'mecanica', definition: 'Asignar un Aliado sin girar para interceptar un ataque enemigo. El daño es simultáneo entre atacante y bloqueador.' },
-  { term: 'Carta Única', category: 'mecanica', definition: 'Restricción que permite solo 1 copia de esta carta en el mazo. Se identifica con un símbolo especial.' },
-  { term: 'Coste', category: 'mecanica', definition: 'Cantidad de Oro que se debe girar para jugar una carta. Aparece en la esquina superior de la carta.' },
-  { term: 'Enfermedad de Invocación', category: 'mecanica', definition: 'Un Aliado recién jugado no puede atacar ni usar habilidades activadas hasta el próximo turno del controlador.' },
-  { term: 'Equipar', category: 'mecanica', definition: 'Asociar un Arma a un Aliado. El Aliado obtiene la Fuerza del Arma sumada a la suya.' },
-  { term: 'Fuerza', category: 'mecanica', definition: 'Valor numérico de un Aliado. Representa tanto su capacidad de ataque como su resistencia al daño.' },
-  { term: 'Girar', category: 'mecanica', definition: 'Rotar una carta 90° para indicar que ha sido usada en este turno.' },
-  { term: 'Oro Inicial', category: 'mecanica', definition: 'La primera carta de Oro que se coloca antes del inicio de la partida. Debe ser un Oro sin habilidad.' },
-  { term: 'Robar', category: 'mecanica', definition: 'Tomar la carta superior de tu mazo y agregarla a tu mano.' },
+  // Mecanicas
+  {
+    term: 'Agrupar',
+    category: 'mecanica',
+    definition:
+      'Mover Oros de Oro Pagado a Reserva de Oro y Aliados de Ataque a Defensa al inicio del turno.',
+  },
+  {
+    term: 'Asignacion de Dano',
+    category: 'mecanica',
+    definition:
+      'Paso final de la Batalla Mitologica donde se compara Fuerza y se determina destruccion y dano al Castillo.',
+  },
+  {
+    term: 'Atacar',
+    category: 'mecanica',
+    definition:
+      'Mover uno o mas Aliados de Linea de Defensa a Linea de Ataque para iniciar Batalla Mitologica.',
+  },
+  {
+    term: 'Batalla Mitologica',
+    category: 'mecanica',
+    definition:
+      'Secuencia de combate: declarar atacantes, declarar bloqueadores, guerra de talismanes y asignacion de dano.',
+  },
+  {
+    term: 'Bloquear',
+    category: 'mecanica',
+    definition:
+      'Asignar un Aliado en Linea de Defensa a un atacante no bloqueado para intentar detener dano.',
+  },
+  {
+    term: 'Botar',
+    category: 'mecanica',
+    definition:
+      'Enviar cartas desde el tope del Castillo al Cementerio. Cada punto de dano al Castillo bota 1 carta.',
+  },
+  {
+    term: 'Carta Unica',
+    category: 'mecanica',
+    definition: 'Carta con limite de 1 copia en mazo, segun reglamento o formato.',
+  },
+  {
+    term: 'Coste',
+    category: 'mecanica',
+    definition: 'Cantidad de Oros que debes pagar para jugar una carta o activar una habilidad.',
+  },
+  {
+    term: 'Declarar Atacantes',
+    category: 'mecanica',
+    definition: 'Subpaso donde eliges que Aliados atacan.',
+  },
+  {
+    term: 'Declarar Bloqueadores',
+    category: 'mecanica',
+    definition: 'Subpaso donde el defensor asigna bloqueos a atacantes.',
+  },
+  {
+    term: 'Descartar',
+    category: 'mecanica',
+    definition: 'Enviar una carta desde la mano al Cementerio.',
+  },
+  {
+    term: 'Desterrar',
+    category: 'mecanica',
+    definition: 'Enviar una carta desde cualquier zona al Destierro.',
+  },
+  {
+    term: 'Destruir',
+    category: 'mecanica',
+    definition: 'Sacar una carta del juego y enviarla al Cementerio.',
+  },
+  {
+    term: 'Guerra de Talismanes',
+    category: 'mecanica',
+    definition:
+      'Subpaso de combate donde ambos jugadores juegan talismanes o habilidades de forma alternada, iniciando el defensor.',
+  },
+  {
+    term: 'Oro Inicial',
+    category: 'mecanica',
+    definition: 'Oro con el que empiezas la partida en Reserva de Oro, antes de robar mano.',
+  },
+  {
+    term: 'Robar',
+    category: 'mecanica',
+    definition: 'Tomar la carta superior del Castillo y ponerla en la mano.',
+  },
 
   // Estados
-  { term: 'Girado', category: 'estado', definition: 'Estado de una carta que ha sido usada (rotada 90°). No puede atacar, bloquear ni activar habilidades que requieran girar.' },
-  { term: 'Derecho', category: 'estado', definition: 'Estado normal de una carta (sin girar). Puede actuar normalmente.' },
-  { term: 'Legal', category: 'estado', definition: 'Estado de una carta que puede usarse sin restricciones en un formato.' },
-  { term: 'Prohibida', category: 'estado', definition: 'Carta que no puede incluirse en ningún mazo del formato (0 copias permitidas).' },
-  { term: 'Restringida', category: 'estado', definition: 'Carta con límite de copias menor al estándar (por ejemplo, limitada a 1 o 2 copias).' },
+  {
+    term: 'Legal',
+    category: 'estado',
+    definition: 'Carta permitida sin restricciones extra en el formato consultado.',
+  },
+  {
+    term: 'Prohibida',
+    category: 'estado',
+    definition: 'Carta no permitida en el formato (0 copias).',
+  },
+  {
+    term: 'Restringida',
+    category: 'estado',
+    definition: 'Carta con limite inferior al estandar de copias (ejemplo: 1 o 2).',
+  },
 
   // General
-  { term: 'Bloque', category: 'general', definition: 'Grupo temático de ediciones que comparten ambientación y mecánicas. Las ediciones de un mismo bloque suelen tener sinergia entre sí.' },
-  { term: 'Edición', category: 'general', definition: 'Conjunto de cartas publicadas juntas. Cada edición pertenece a un Bloque y tiene cartas con mecánicas propias.' },
-  { term: 'Formato', category: 'general', definition: 'Conjunto de reglas que define qué cartas y ediciones se pueden usar en un mazo. Ej: Libre, Racial Edición, etc.' },
-  { term: 'Raza', category: 'general', definition: 'Clasificación temática de los Aliados (Griegos, Egipcios, etc.). En formato Racial, el mazo se construye con una sola raza.' },
-  { term: 'Rareza', category: 'general', definition: 'Indicador de la frecuencia de aparición de una carta en sobres. Común, Poco Común, Rara, Mítica, Ultrarara.' },
+  {
+    term: 'Bloque',
+    category: 'general',
+    definition: 'Conjunto de ediciones relacionadas por ambientacion y mecanicas.',
+  },
+  {
+    term: 'Edicion',
+    category: 'general',
+    definition: 'Set de cartas publicado en una fecha especifica.',
+  },
+  {
+    term: 'Formato',
+    category: 'general',
+    definition:
+      'Reglas de construccion y juego que determinan cartas permitidas, limites y banlist.',
+  },
+  {
+    term: 'Frecuencia',
+    category: 'general',
+    definition:
+      'Nivel de aparicion de una carta (ej: Vasalla, Cortesana, Real), asociado a su distribucion en producto.',
+  },
+  {
+    term: 'Fuerza',
+    category: 'general',
+    definition: 'Valor de dano que un Aliado asigna en combate o al Castillo.',
+  },
+  {
+    term: 'Raza',
+    category: 'general',
+    definition:
+      'Atributo propio de Aliados que interactua con habilidades y restricciones de formato.',
+  },
 ];
 
 export default function GlossaryPage() {
-  // Group by first letter
   const grouped = new Map<string, GlossaryEntry[]>();
   for (const entry of GLOSSARY.sort((a, b) => a.term.localeCompare(b.term, 'es'))) {
     const letter = entry.term[0]!.toUpperCase();
@@ -96,7 +323,6 @@ export default function GlossaryPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/resources" className="text-muted-foreground hover:text-foreground">
           Recursos
@@ -109,10 +335,9 @@ export default function GlossaryPage() {
       </div>
 
       <p className="text-muted-foreground">
-        Referencia rápida de todos los términos, mecánicas y conceptos del juego Mitos y Leyendas.
+        Referencia rapida de terminos y mecanicas del juego Mitos y Leyendas.
       </p>
 
-      {/* Category legend */}
       <div className="flex flex-wrap gap-2">
         {Object.entries(CATEGORY_CONFIG).map(([key, config]) => (
           <Badge key={key} className={config.className}>
@@ -123,20 +348,18 @@ export default function GlossaryPage() {
 
       <Separator />
 
-      {/* Letter index */}
       <nav className="flex flex-wrap gap-1">
         {Array.from(grouped.keys()).map((letter) => (
           <a
             key={letter}
             href={`#letter-${letter}`}
-            className="flex h-8 w-8 items-center justify-center rounded-md border text-sm font-medium hover:bg-accent/20 transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-md border text-sm font-medium transition-colors hover:bg-accent/20"
           >
             {letter}
           </a>
         ))}
       </nav>
 
-      {/* Glossary entries */}
       <div className="space-y-8">
         {Array.from(grouped.entries()).map(([letter, entries]) => (
           <section key={letter} id={`letter-${letter}`}>
@@ -145,20 +368,15 @@ export default function GlossaryPage() {
               {entries.map((entry) => {
                 const catConfig = CATEGORY_CONFIG[entry.category];
                 return (
-                  <div
-                    key={entry.term}
-                    className="flex gap-3 rounded-lg border bg-card p-3"
-                  >
-                    <div className="flex flex-col items-start gap-1 min-w-0">
+                  <div key={entry.term} className="flex gap-3 rounded-lg border bg-card p-3">
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{entry.term}</span>
-                        <Badge className={`${catConfig.className} text-[10px] px-1.5 py-0`}>
+                        <Badge className={`${catConfig.className} px-1.5 py-0 text-[10px]`}>
                           {catConfig.label}
                         </Badge>
                       </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {entry.definition}
-                      </p>
+                      <p className="text-sm leading-relaxed text-muted-foreground">{entry.definition}</p>
                     </div>
                   </div>
                 );
@@ -168,12 +386,13 @@ export default function GlossaryPage() {
         ))}
       </div>
 
-      {/* Info */}
       <div className="rounded-lg border bg-muted/30 p-4">
         <p className="text-xs text-muted-foreground">
-          Este glosario se actualiza periódicamente con nuevos términos y mecánicas introducidas en
-          cada nueva edición del juego. Para consultas específicas sobre interacciones de cartas,
-          consulta la sección de <Link href="/resources/oracles" className="text-accent hover:underline">Oráculos</Link>.
+          Este glosario se alinea con reglas base. Para interacciones especificas de cartas, revisa{' '}
+          <Link href="/resources/oracles" className="text-accent hover:underline">
+            Oraculos
+          </Link>
+          .
         </p>
       </div>
     </div>

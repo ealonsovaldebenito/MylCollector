@@ -236,7 +236,16 @@ export function CardForm({
       });
       const json = await res.json();
       if (!json.ok) {
-        alert(json.error?.message ?? 'Error al eliminar impresión');
+        const references = (
+          json.error?.details as { references?: Array<{ label?: string; count?: number }> } | undefined
+        )?.references;
+        const usageLines =
+          references && references.length > 0
+            ? `\n\nUsos activos:\n${references
+                .map((ref) => `- ${ref.label ?? 'referencia'}: ${ref.count ?? 0}`)
+                .join('\n')}`
+            : '';
+        alert((json.error?.message ?? 'Error al eliminar impresión') + usageLines);
         return;
       }
       setExistingPrintings((prev) => prev.filter((p) => p.card_printing_id !== printingId));
@@ -873,10 +882,28 @@ export function CardForm({
                       </div>
 
                       <div className="min-w-0 flex-1 space-y-2">
+                        <div className="space-y-1">
+                          <p className="truncate text-sm font-semibold">
+                            {p.printing_variant?.trim() || 'standard'}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {editionDisplayName(p.edition.name)}
+                            </Badge>
+                            {p.collector_number ? (
+                              <Badge variant="outline" className="text-xs font-mono">
+                                #{p.collector_number}
+                              </Badge>
+                            ) : null}
+                            {p.illustrator ? (
+                              <Badge variant="outline" className="text-xs">
+                                Ilus: {p.illustrator}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
+
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="secondary" className="text-xs">
-                            {editionDisplayName(p.edition.name)}
-                          </Badge>
                           {consensusPrice !== null && typeof consensusPrice === 'number' ? (
                             <Badge variant="secondary" className="text-xs font-mono">
                               {formatCLP(consensusPrice)}

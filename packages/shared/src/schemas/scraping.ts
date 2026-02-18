@@ -53,6 +53,7 @@ export type ScrapeJobItem = z.infer<typeof scrapeJobItemSchema>;
 export const triggerScrapeSchema = z.object({
   scope: z.enum(['all', 'single']).default('all'),
   card_printing_id: z.string().uuid().optional(),
+  store_printing_link_id: z.string().uuid().optional(),
 });
 
 export type TriggerScrape = z.infer<typeof triggerScrapeSchema>;

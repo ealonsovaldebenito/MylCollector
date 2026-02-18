@@ -6,6 +6,8 @@
  *
  * Changelog:
  *   2026-02-16 — Initial creation
+ *   2026-02-18 — Validate duplicate product URLs per store (normalized URL).
+ *   2026-02-18 — Fix delete link flow with scoped ownership checks.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -16,6 +18,46 @@ import { AppError } from '../api/errors';
 import { isManagedCardImageUrl, uploadCardImageFromUrl } from './storage.service';
 
 type Client = SupabaseClient<Database>;
+
+const TRACKING_QUERY_PARAM_PREFIXES = ['utm_'];
+const TRACKING_QUERY_PARAMS = new Set([
+  'fbclid',
+  'gclid',
+  'mc_cid',
+  'mc_eid',
+  'igshid',
+  'ref',
+  'ref_src',
+  'source',
+]);
+
+function normalizeProductUrl(value: string): string {
+  const trimmed = value.trim();
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = '';
+
+    const next = new URLSearchParams();
+    const keys = [...parsed.searchParams.keys()].sort((a, b) => a.localeCompare(b));
+    for (const key of keys) {
+      const lower = key.toLowerCase();
+      if (TRACKING_QUERY_PARAM_PREFIXES.some((prefix) => lower.startsWith(prefix))) continue;
+      if (TRACKING_QUERY_PARAMS.has(lower)) continue;
+      const values = parsed.searchParams.getAll(key);
+      for (const raw of values) {
+        next.append(key, raw.trim());
+      }
+    }
+    parsed.search = next.toString();
+
+    if (parsed.pathname.length > 1) {
+      parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    }
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
 
 // ============================================================================
 // Store CRUD
@@ -150,6 +192,35 @@ export async function createStorePrintingLink(
   data: CreateStorePrintingLink,
   options?: { scraped_image_url?: string | null },
 ) {
+  const normalizedProductUrl = normalizeProductUrl(data.product_url);
+
+  const { data: existingUrls, error: existingUrlsError } = await supabase
+    .from('store_printing_links')
+    .select('store_printing_link_id, card_printing_id, product_url')
+    .eq('store_id', storeId)
+    .eq('is_active', true);
+
+  if (existingUrlsError) {
+    throw new AppError('INTERNAL_ERROR', 'Error al validar URL de producto');
+  }
+
+  const duplicatedUrl = (existingUrls ?? []).find((item) => {
+    const currentUrl = item.product_url?.trim();
+    if (!currentUrl) return false;
+    return normalizeProductUrl(currentUrl) === normalizedProductUrl;
+  });
+
+  if (duplicatedUrl) {
+    throw new AppError(
+      'VALIDATION_ERROR',
+      'Esta URL ya existe en esta tienda. Usa otra URL o elimina el link existente.',
+      {
+        existing_link_id: duplicatedUrl.store_printing_link_id,
+        existing_card_printing_id: duplicatedUrl.card_printing_id,
+      },
+    );
+  }
+
   async function fillMissingPrintingImage() {
     const scraped = options?.scraped_image_url?.trim();
     if (!scraped) return;
@@ -169,7 +240,7 @@ export async function createStorePrintingLink(
       supabase,
       scraped,
       data.card_printing_id,
-      { base_url: data.product_url },
+      { base_url: normalizedProductUrl },
     );
     if (!uploaded) return;
 
@@ -184,7 +255,7 @@ export async function createStorePrintingLink(
     .insert({
       store_id: storeId,
       card_printing_id: data.card_printing_id,
-      product_url: data.product_url,
+      product_url: normalizedProductUrl,
       product_name: data.product_name ?? null,
     } as never)
     .select('*')
@@ -207,8 +278,8 @@ export async function createStorePrintingLink(
       if ((!existing.product_name || existing.product_name.trim() === '') && data.product_name) {
         updatePayload.product_name = data.product_name;
       }
-      if ((!existing.product_url || existing.product_url.trim() === '') && data.product_url) {
-        updatePayload.product_url = data.product_url;
+      if ((!existing.product_url || existing.product_url.trim() === '') && normalizedProductUrl) {
+        updatePayload.product_url = normalizedProductUrl;
       }
 
       let updated = existing;
@@ -233,12 +304,34 @@ export async function createStorePrintingLink(
   return link;
 }
 /** Delete a store-printing link. */
-export async function deleteStorePrintingLink(supabase: Client, linkId: string) {
-  const { error } = await supabase
+export async function deleteStorePrintingLink(
+  supabase: Client,
+  linkId: string,
+  options?: { storeId?: string },
+) {
+  let existingQuery = supabase
+    .from('store_printing_links')
+    .select('store_printing_link_id', { head: true, count: 'exact' })
+    .eq('store_printing_link_id', linkId);
+
+  if (options?.storeId) {
+    existingQuery = existingQuery.eq('store_id', options.storeId);
+  }
+
+  const { count, error: existingError } = await existingQuery;
+  if (existingError) throw new AppError('INTERNAL_ERROR', 'Error al validar link de tienda');
+  if (!count) throw new AppError('NOT_FOUND', 'Link de tienda no encontrado');
+
+  let deleteQuery = supabase
     .from('store_printing_links')
     .delete()
     .eq('store_printing_link_id', linkId);
 
+  if (options?.storeId) {
+    deleteQuery = deleteQuery.eq('store_id', options.storeId);
+  }
+
+  const { error } = await deleteQuery;
   if (error) throw new AppError('INTERNAL_ERROR', 'Error al eliminar link de tienda');
 }
 

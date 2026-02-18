@@ -1,13 +1,24 @@
 /**
- * /resources/rules — Reglas oficiales de MYL.
- * Muestra las reglas básicas del juego, fases de turno y mecánicas generales.
+ * /resources/rules - Reglas oficiales de MYL.
+ * Guia publica de reglas base (Castillo de 50 cartas, turnos, combate y zonas).
  *
  * Changelog:
- *   2026-02-16 — Initial creation
+ *   2026-02-16 - Initial creation
+ *   2026-02-18 - Contenido corregido segun reglas reales de Mitos y Leyendas.
  */
+
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { Scale, Swords, Coins, Shield, Layers, ArrowRight } from 'lucide-react';
+import {
+  ArrowRight,
+  Coins,
+  Landmark,
+  Layers,
+  Scale,
+  Shield,
+  Swords,
+} from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
@@ -16,182 +27,277 @@ export const metadata: Metadata = {
   description: 'Reglas oficiales del juego Mitos y Leyendas',
 };
 
-const TURN_PHASES = [
-  {
-    name: 'Fase de Robo',
-    description: 'Al inicio de tu turno, robas una carta de tu mazo.',
-    note: 'El jugador que va primero no roba en su primer turno.',
-  },
-  {
-    name: 'Fase de Oro',
-    description: 'Puedes bajar una carta de Oro de tu mano a tu Zona de Oro (boca abajo).',
-    note: 'Solo una carta de Oro por turno.',
-  },
-  {
-    name: 'Fase Principal',
-    description:
-      'Puedes jugar Aliados, Armas, Talismanes y Tótems pagando su coste. También puedes activar habilidades y equipar armas.',
-    note: 'No hay límite de cartas a jugar si tienes oro disponible.',
-  },
-  {
-    name: 'Fase de Ataque',
-    description:
-      'Declara atacantes girando tus Aliados. El defensor puede bloquear con sus Aliados sin girar.',
-    note: 'Los Aliados con enfermedad de invocación (recién jugados) no pueden atacar.',
-  },
-  {
-    name: 'Fase Final',
-    description: 'Se resuelven efectos de fin de turno. Si tienes más de 7 cartas en mano, descarta hasta tener 7.',
-    note: null,
-  },
-];
-
-const ZONES = [
-  { name: 'Mazo', description: 'Tu mazo de 50 cartas. Robas de aquí cada turno.' },
-  { name: 'Mano', description: 'Cartas que tienes disponibles para jugar. Máximo 7 al final del turno.' },
-  { name: 'Zona de Oro', description: 'Cartas de Oro boca abajo que producen recursos para pagar costes.' },
-  { name: 'Arena', description: 'Zona donde se colocan Aliados, Armas, Talismanes y Tótems en juego.' },
-  { name: 'Cementerio', description: 'Pila de descarte. Cartas destruidas o usadas van aquí.' },
-  { name: 'Exilio', description: 'Zona removida del juego. Las cartas exiliadas no pueden recuperarse normalmente.' },
-];
-
 const CARD_TYPES = [
-  {
-    name: 'Oro',
-    icon: Coins,
-    description:
-      'Recurso fundamental del juego. Se colocan boca abajo en la Zona de Oro para producir puntos de recurso y pagar el coste de otras cartas.',
-  },
   {
     name: 'Aliado',
     icon: Swords,
     description:
-      'Criaturas que luchan por ti. Tienen Fuerza (ataque y vida). Pueden atacar y bloquear. Muchos tienen habilidades especiales.',
+      'Son las cartas que atacan y bloquean. Tienen Fuerza, Raza y habilidades. Permanecen en juego hasta salir por combate o efecto.',
+  },
+  {
+    name: 'Talisman',
+    icon: Layers,
+    description:
+      'Hechizos o eventos de efecto inmediato. Tras resolver, van al Cementerio.',
   },
   {
     name: 'Arma',
     icon: Shield,
     description:
-      'Se equipa a un Aliado para aumentar su Fuerza. Un Aliado solo puede tener una Arma equipada a la vez.',
+      'Se anexan a un Aliado y le dan bonos o habilidades. Si el portador sale del juego, el arma se destruye.',
   },
   {
-    name: 'Talismán',
-    icon: Layers,
+    name: 'Totem',
+    icon: Landmark,
     description:
-      'Cartas de efecto inmediato. Se juegan, resuelven su efecto y van al Cementerio.',
+      'Altares, monumentos o locaciones con efectos continuos. Permanecen en la Linea de Apoyo.',
   },
   {
-    name: 'Tótem',
-    icon: Layers,
+    name: 'Oro',
+    icon: Coins,
     description:
-      'Permanentes que otorgan efectos continuos. Permanecen en juego hasta ser destruidos.',
+      'Recurso para pagar costes. Los Oros usados pasan a Oro Pagado y se recuperan al agrupar.',
   },
+];
+
+const GAME_ZONES = [
+  {
+    name: 'Castillo (Mazo)',
+    description:
+      'Baraja de 50 cartas. Cuando recibes dano, botas cartas desde aqui al Cementerio. Si se queda sin cartas, pierdes.',
+  },
+  {
+    name: 'Mano',
+    description:
+      'Inicias con 8 cartas. Al final de tu turno, si tienes mas de 8, descartas hasta quedar en 8.',
+  },
+  {
+    name: 'Cementerio',
+    description:
+      'Van cartas destruidas, descartadas o botadas desde el Castillo.',
+  },
+  {
+    name: 'Destierro',
+    description:
+      'Zona fuera de juego. Normalmente las cartas desterradas no se recuperan.',
+  },
+  {
+    name: 'Linea de Defensa',
+    description:
+      'Aqui entran los Aliados. Desde esta linea pueden bloquear.',
+  },
+  {
+    name: 'Linea de Ataque',
+    description:
+      'Cuando un Aliado ataca se mueve aqui. Mientras esta aqui, no puede bloquear.',
+  },
+  {
+    name: 'Linea de Apoyo',
+    description:
+      'Zona de juego de los Totem.',
+  },
+  {
+    name: 'Reserva de Oro',
+    description:
+      'Oros disponibles para pagar costes.',
+  },
+  {
+    name: 'Oro Pagado',
+    description:
+      'Zona temporal de los Oros usados para pagar costes.',
+  },
+];
+
+const TURN_PHASES = [
+  {
+    name: '1) Fase de Agrupacion',
+    description:
+      'Mueve todos los Oros de Oro Pagado a tu Reserva de Oro y todos los Aliados de Linea de Ataque a Linea de Defensa.',
+  },
+  {
+    name: '2) Fase de Vigilia',
+    description:
+      'Al inicio puedes poner 1 Oro desde tu mano a la Reserva de Oro. Luego puedes jugar cartas y habilidades pagando sus costes.',
+  },
+  {
+    name: '3) Batalla Mitologica',
+    description:
+      'Declaras atacantes, el defensor declara bloqueadores, se juega Guerra de Talismanes y luego se asigna dano.',
+  },
+  {
+    name: '4) Fase Final',
+    description:
+      'Se resuelven efectos de termino de turno.',
+  },
+  {
+    name: '5) Fase de Robar',
+    description:
+      'Robas 1 carta. Si superas 8 cartas en mano, descartas hasta quedar en 8.',
+  },
+];
+
+const BATTLE_STEPS = [
+  {
+    name: 'A. Declarar Atacantes',
+    description:
+      'El jugador activo mueve los Aliados que atacaran desde Defensa a Ataque. Los Aliados que entraron este turno no pueden atacar.',
+  },
+  {
+    name: 'B. Declarar Bloqueadores',
+    description:
+      'El defensor asigna Aliados de su Linea de Defensa para bloquear atacantes no bloqueados.',
+  },
+  {
+    name: 'C. Guerra de Talismanes',
+    description:
+      'Empieza el defensor y luego alternan jugando Talismanes o habilidades.',
+  },
+  {
+    name: 'D. Asignacion de Dano',
+    description:
+      'Se compara Fuerza entre atacante y bloqueador. Si sobra dano del atacante, ese excedente se bota del Castillo defensor.',
+  },
+];
+
+const BATTLE_RESULTS = [
+  'Si el bloqueador tiene mas Fuerza que el atacante, se destruye el atacante.',
+  'Si tienen la misma Fuerza, ambos se destruyen.',
+  'Si el atacante tiene mas Fuerza, se destruye el bloqueador y la diferencia dania el Castillo.',
+  'Si un atacante no es bloqueado, toda su Fuerza dania el Castillo defensor.',
 ];
 
 export default function RulesPage() {
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      {/* Header */}
+    <div className="mx-auto max-w-5xl space-y-8">
       <div className="flex items-center gap-3">
         <Link href="/resources" className="text-muted-foreground hover:text-foreground">
           Recursos
         </Link>
         <span className="text-muted-foreground">/</span>
         <div className="flex items-center gap-2">
-          <Scale className="h-5 w-5 text-blue-600" />
-          <h1 className="font-display text-2xl font-bold">Reglas del Juego</h1>
+          <Scale className="h-5 w-5 text-accent" />
+          <h1 className="font-display text-2xl font-bold">Reglas de Juego</h1>
         </div>
       </div>
 
-      <p className="text-muted-foreground">
-        Guía de referencia rápida de las reglas oficiales de Mitos y Leyendas.
-        Para el reglamento completo, consulta el documento oficial de MYL.
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Esta guia resume las reglas base de Mitos y Leyendas segun manual iniciatico y
+        reglamento oficial: objetivo, tipos de carta, zonas, fases y combate.
       </p>
 
       <Separator />
 
-      {/* Objetivo del juego */}
-      <section className="space-y-3">
+      <section className="space-y-4">
         <h2 className="font-display text-xl font-semibold">Objetivo del Juego</h2>
-        <div className="rounded-lg border bg-card p-5">
-          <p className="text-sm leading-relaxed">
-            El objetivo de MYL es reducir los puntos de vida de tu oponente a <strong>0</strong>.
-            Cada jugador comienza con un mazo de <strong>50 cartas</strong> y roba <strong>8 cartas</strong> al inicio.
-            Tu mazo es tu vida: cuando un Aliado ataca directamente y no es bloqueado, el defensor descarta
-            cartas de su mazo igual a la Fuerza del atacante. Si un jugador no puede robar carta al inicio de
-            su turno, pierde la partida.
-          </p>
+        <div className="rounded-lg border bg-card p-5 text-sm leading-relaxed">
+          Derribar las defensas del <strong>Castillo</strong> oponente. Tu Castillo es tu mazo de
+          <strong> 50 cartas</strong>: cuando recibes dano botas cartas desde el tope al Cementerio.
+          Si tu Castillo se queda sin cartas, pierdes la partida.
         </div>
       </section>
 
-      {/* Tipos de carta */}
+      <section className="space-y-4">
+        <h2 className="font-display text-xl font-semibold">Preparacion de la Partida</h2>
+        <div className="rounded-lg border bg-card p-5">
+          <ol className="list-decimal pl-5 text-sm text-muted-foreground space-y-2">
+            <li>Definan al azar quien empieza.</li>
+            <li>
+              Pon un <strong>Oro inicial</strong> (normalmente sin habilidad) en tu Reserva de Oro.
+            </li>
+            <li>Baraja tu Castillo y roba 8 cartas.</li>
+            <li>
+              Mulligan opcional: puedes cambiar tu mano, pero cada nuevo mulligan roba 1 carta menos.
+            </li>
+            <li>Cuando ambos confirman mano, inicia la partida.</li>
+          </ol>
+        </div>
+      </section>
+
       <section className="space-y-4">
         <h2 className="font-display text-xl font-semibold">Tipos de Carta</h2>
         <div className="grid gap-3 sm:grid-cols-2">
-          {CARD_TYPES.map((ct) => {
-            const Icon = ct.icon;
+          {CARD_TYPES.map((type) => {
+            const Icon = type.icon;
             return (
-              <div key={ct.name} className="rounded-lg border bg-card p-4 space-y-2">
+              <div key={type.name} className="rounded-lg border bg-card p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <Icon className="h-5 w-5 text-accent" />
-                  <h3 className="font-semibold">{ct.name}</h3>
+                  <h3 className="font-semibold">{type.name}</h3>
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">{ct.description}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{type.description}</p>
               </div>
             );
           })}
         </div>
       </section>
 
-      {/* Fases del turno */}
+      <section className="space-y-4">
+        <h2 className="font-display text-xl font-semibold">Zonas del Juego</h2>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {GAME_ZONES.map((zone) => (
+            <div key={zone.name} className="rounded-lg border bg-card p-4 space-y-1">
+              <h3 className="font-semibold text-sm">{zone.name}</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">{zone.description}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="space-y-4">
         <h2 className="font-display text-xl font-semibold">Fases del Turno</h2>
         <div className="space-y-3">
-          {TURN_PHASES.map((phase, i) => (
-            <div key={phase.name} className="flex gap-4 rounded-lg border bg-card p-4">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-sm font-bold text-accent">
-                {i + 1}
-              </div>
-              <div className="space-y-1">
-                <h3 className="font-semibold">{phase.name}</h3>
-                <p className="text-sm text-muted-foreground">{phase.description}</p>
-                {phase.note && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    Nota: {phase.note}
-                  </p>
-                )}
-              </div>
+          {TURN_PHASES.map((phase) => (
+            <div key={phase.name} className="rounded-lg border bg-card p-4 space-y-1">
+              <h3 className="font-semibold">{phase.name}</h3>
+              <p className="text-sm text-muted-foreground">{phase.description}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Zonas de juego */}
       <section className="space-y-4">
-        <h2 className="font-display text-xl font-semibold">Zonas de Juego</h2>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {ZONES.map((zone) => (
-            <div key={zone.name} className="rounded-lg border bg-card p-4 space-y-1">
-              <h3 className="font-semibold text-sm">{zone.name}</h3>
-              <p className="text-xs text-muted-foreground">{zone.description}</p>
+        <h2 className="font-display text-xl font-semibold">Batalla Mitologica</h2>
+        <div className="space-y-3">
+          {BATTLE_STEPS.map((step) => (
+            <div key={step.name} className="rounded-lg border bg-card p-4 space-y-1">
+              <h3 className="font-semibold">{step.name}</h3>
+              <p className="text-sm text-muted-foreground">{step.description}</p>
             </div>
           ))}
         </div>
+        <div className="rounded-lg border bg-muted/30 p-4">
+          <p className="text-sm font-medium mb-2">Resolucion rapida de combate</p>
+          <ul className="space-y-1 text-sm text-muted-foreground">
+            {BATTLE_RESULTS.map((line) => (
+              <li key={line}>- {line}</li>
+            ))}
+          </ul>
+        </div>
       </section>
 
-      {/* Conceptos clave */}
-      <section className="space-y-4">
+      <section className="space-y-3">
         <h2 className="font-display text-xl font-semibold">Conceptos Clave</h2>
         <div className="space-y-2">
           {[
-            { term: 'Enfermedad de invocación', def: 'Un Aliado recién jugado no puede atacar ni usar habilidades activadas hasta tu próximo turno.' },
-            { term: 'Girar', def: 'Rotar una carta 90° para indicar que ha sido usada (atacar, pagar coste, activar habilidad).' },
-            { term: 'Carta Única', def: 'Solo puedes tener 1 copia en tu mazo. Se indica con un símbolo especial.' },
-            { term: 'Oro inicial', def: 'La primera carta de Oro que colocas al inicio de la partida antes de robar.' },
-            { term: 'Bloquear', def: 'Asignar un Aliado sin girar para recibir el ataque de un Aliado enemigo. El daño es simultáneo.' },
+            {
+              term: 'Fuerza',
+              def: 'Cantidad de dano que inflige un Aliado en combate y al Castillo.',
+            },
+            {
+              term: 'Raza',
+              def: 'Atributo exclusivo de Aliados. Muchas habilidades interactuan con la Raza.',
+            },
+            {
+              term: 'Botar cartas',
+              def: 'Por cada punto de dano al Castillo, se envia 1 carta del tope al Cementerio.',
+            },
+            {
+              term: 'Oro por turno',
+              def: 'Solo puedes poner 1 Oro al inicio de tu Fase de Vigilia.',
+            },
           ].map((item) => (
             <div key={item.term} className="flex gap-3 rounded-lg border bg-card p-3">
-              <Badge variant="outline" className="shrink-0 h-fit">
+              <Badge variant="outline" className="h-fit shrink-0">
                 {item.term}
               </Badge>
               <p className="text-sm text-muted-foreground">{item.def}</p>
@@ -200,10 +306,15 @@ export default function RulesPage() {
         </div>
       </section>
 
-      {/* Link to glossary */}
-      <div className="rounded-lg border bg-muted/30 p-4">
-        <Link href="/resources/glossary" className="flex items-center gap-2 text-sm font-medium text-accent hover:underline">
-          Ver Glosario completo
+      <div className="rounded-lg border bg-muted/30 p-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          Para terminos avanzados, formatos y palabras clave, revisa el glosario.
+        </p>
+        <Link
+          href="/resources/glossary"
+          className="inline-flex items-center gap-2 text-sm font-medium text-accent hover:underline"
+        >
+          Ver glosario
           <ArrowRight className="h-4 w-4" />
         </Link>
       </div>

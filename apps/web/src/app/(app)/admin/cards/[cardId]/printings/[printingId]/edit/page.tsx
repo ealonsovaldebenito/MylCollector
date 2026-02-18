@@ -1,12 +1,22 @@
+/**
+ * /admin/cards/[cardId]/printings/[printingId]/edit
+ * Admin editor for a single printing.
+ *
+ * Changelog:
+ *   2026-02-18 - Added richer printing summary panel for edit context.
+ */
+
 'use client';
 
-import { use } from 'react';
-import { useCatalogData } from '@/hooks/use-catalog-data';
-import { CardPrintingForm } from '@/components/admin/card-printing-form';
-import { Skeleton } from '@/components/ui/skeleton';
-import { ErrorState } from '@/components/feedback';
-import { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import type { CardPrintingWithRelations } from '@myl/shared';
+import { CardPrintingForm } from '@/components/admin/card-printing-form';
+import { CardImage } from '@/components/catalog/card-image';
+import { ErrorState } from '@/components/feedback';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useCatalogData } from '@/hooks/use-catalog-data';
+import { ExternalLink } from 'lucide-react';
 
 export default function EditPrintingPage({
   params,
@@ -28,20 +38,22 @@ export default function EditPrintingPage({
           setError(json.error?.message ?? 'Error al cargar carta');
           return;
         }
-        const p = json.data.printings.find(
-          (pr: CardPrintingWithRelations) => pr.card_printing_id === printingId,
+
+        const foundPrinting = json.data.printings.find(
+          (candidate: CardPrintingWithRelations) => candidate.card_printing_id === printingId,
         );
-        if (!p) {
-          setError('Printing no encontrado');
+        if (!foundPrinting) {
+          setError('Impresion no encontrada');
           return;
         }
-        setPrinting(p);
+        setPrinting(foundPrinting);
       } catch {
         setError('Error de conexion');
       } finally {
         setIsLoading(false);
       }
     }
+
     if (!catalogLoading) {
       loadPrinting();
     }
@@ -49,22 +61,71 @@ export default function EditPrintingPage({
 
   if (catalogLoading || isLoading) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4">
-        <Skeleton className="h-8 w-48" />
+      <div className="mx-auto max-w-4xl space-y-4">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-40 w-full" />
         <Skeleton className="h-96 w-full" />
       </div>
     );
   }
 
   if (error || !printing) {
-    return <ErrorState message={error ?? 'Printing no encontrado'} />;
+    return <ErrorState message={error ?? 'Impresion no encontrada'} />;
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="font-display text-2xl font-bold">
-        Editar Printing: {printing.edition.name}
-      </h1>
+    <div className="mx-auto max-w-4xl space-y-6">
+      <div>
+        <h1 className="font-display text-2xl font-bold">
+          Editar impresion: {printing.printing_variant?.trim() || 'standard'}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Edicion: {printing.edition.name} ({printing.edition.code})
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[140px_1fr]">
+          <div className="overflow-hidden rounded-md border border-border bg-background">
+            <CardImage
+              src={printing.image_url ?? null}
+              alt={`Impresion ${printing.printing_variant ?? 'standard'}`}
+              className="h-[190px] w-full"
+              fit="contain"
+            />
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{printing.legal_status}</Badge>
+              {printing.rarity_tier ? <Badge variant="outline">{printing.rarity_tier.name}</Badge> : null}
+              {printing.collector_number ? (
+                <Badge variant="outline" className="font-mono">
+                  #{printing.collector_number}
+                </Badge>
+              ) : null}
+            </div>
+
+            <div className="text-sm text-muted-foreground">
+              <p className="font-mono text-xs">{printing.card_printing_id}</p>
+              <p>{printing.illustrator ? `Ilustrador: ${printing.illustrator}` : 'Ilustrador: N/A'}</p>
+              {printing.image_url ? (
+                <a
+                  className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                  href={printing.image_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Ver imagen actual <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <p className="text-xs">Sin imagen registrada</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <CardPrintingForm
         cardId={cardId}
         printingId={printingId}

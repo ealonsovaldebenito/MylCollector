@@ -6,13 +6,16 @@
  *   2026-02-16 — Initial creation
  *   2026-02-16 — Added platform selector + scrape execution
  *   2026-02-16 — Added store printing links management panel
+ *   2026-02-19 — Refactor: modal de vinculación extraído a componente modular.
+ *   2026-02-19 — Scrape automático tras vincular link ahora procesa solo el último link añadido.
+ *   2026-02-19 — UX: estados visuales de progreso/errores para scraping y vinculación.
  */
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import {
   Store, RefreshCw, Plus, ExternalLink, Trash2, Settings, Zap,
-  Globe, Clock, Link2, Search, X, ChevronRight, Package, Wand2, Image as ImageIcon, Loader2,
+  Globe, Clock, Link2, X, ChevronRight, Wand2, Image as ImageIcon, Loader2,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -29,6 +32,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { StoreLinkDialog } from '@/components/admin/stores/store-link-dialog';
+import { AppAlert, type AppAlertVariant } from '@/components/ui/app-alert';
 
 // ============================================================================
 // Types
@@ -110,17 +115,6 @@ const PLATFORM_OPTIONS = [
   { value: 'generic_og', label: 'Generico (OG)', description: 'Cualquier tienda con meta tags OG' },
 ];
 
-const STORE_PRESETS: Array<{ key: string; name: string; url: string; platform: string }> = [
-  { key: 'oneup', name: 'OneUpStore', url: 'https://www.oneupstore.cl', platform: 'woocommerce' },
-  { key: 'mylserena', name: 'MylSerena', url: 'https://mylserena.cl', platform: 'woocommerce' },
-  { key: 'reino', name: 'El Reino de los Duelos', url: 'https://singles.elreinodelosduelos.cl', platform: 'woocommerce' },
-  { key: 'minimarket', name: 'MinimarketTCG', url: 'https://minimarketcg.cl', platform: 'woocommerce' },
-  { key: 'gorila', name: 'GorilaTCG', url: 'https://www.gorilatcg.cl', platform: 'woocommerce' },
-  { key: 'pandora', name: 'PandoraStore', url: 'https://www.pandorastore.cl', platform: 'jumpseller' },
-  { key: 'laira', name: 'LairaCL', url: 'https://laira.cl', platform: 'generic_og' },
-  { key: 'camelot', name: 'Camelot TCG', url: 'https://camelotcg.cl', platform: 'woocommerce' },
-];
-
 function formatCLP(price: number): string {
   return new Intl.NumberFormat('es-CL', {
     style: 'currency', currency: 'CLP',
@@ -130,6 +124,20 @@ function formatCLP(price: number): string {
 
 function normalizeName(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeProductUrl(value: string): string {
+  const trimmed = value.trim();
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = '';
+    if (parsed.pathname.length > 1) {
+      parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    }
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
 }
 
 function isManagedCardImageUrl(url: string | null | undefined): boolean {
@@ -156,6 +164,7 @@ export default function AdminStoresPage() {
   const [formPlatform, setFormPlatform] = useState('generic_og');
   const [isSaving, setIsSaving] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<string | null>(null);
+  const [scrapingStoreId, setScrapingStoreId] = useState<string | null>(null);
 
   // Links panel state
   const [selectedStore, setSelectedStore] = useState<StoreRow | null>(null);
@@ -176,6 +185,8 @@ export default function AdminStoresPage() {
   const [linkProductUrl, setLinkProductUrl] = useState('');
   const [linkProductName, setLinkProductName] = useState('');
   const [addingLink, setAddingLink] = useState(false);
+  const [addLinkProgress, setAddLinkProgress] = useState<string | null>(null);
+  const [addLinkError, setAddLinkError] = useState<string | null>(null);
 
   // Quick scrape preview
   const [quickUrl, setQuickUrl] = useState('');
@@ -184,8 +195,18 @@ export default function AdminStoresPage() {
   const [quickError, setQuickError] = useState<string | null>(null);
   const [suggestedStore, setSuggestedStore] = useState<{ name: string; url: string; platform: string } | null>(null);
   const [creatingSuggested, setCreatingSuggested] = useState(false);
-  const [selectedPresetKey, setSelectedPresetKey] = useState<string>('');
-  const [creatingPreset, setCreatingPreset] = useState(false);
+  const [pageAlert, setPageAlert] = useState<{
+    variant: AppAlertVariant;
+    title: string;
+    description?: string;
+  } | null>(null);
+
+  const showPageAlert = useCallback(
+    (variant: AppAlertVariant, title: string, description?: string) => {
+      setPageAlert({ variant, title, description });
+    },
+    [],
+  );
 
   // ---- Store CRUD ----
 
@@ -256,14 +277,15 @@ export default function AdminStoresPage() {
       });
       const json = await res.json();
       if (!json.ok) {
-        alert(json.error?.message ?? 'Error al guardar');
+        showPageAlert('error', 'No se pudo guardar la tienda.', json.error?.message ?? undefined);
         return;
       }
 
       setDialogOpen(false);
+      showPageAlert('success', 'Tienda guardada correctamente.');
       load();
     } catch {
-      alert('Error de conexión');
+      showPageAlert('error', 'Error de conexion.', 'No se pudo guardar la tienda.');
     } finally {
       setIsSaving(false);
     }
@@ -275,18 +297,20 @@ export default function AdminStoresPage() {
       const res = await fetch(`/api/v1/admin/stores/${store.store_id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.ok) {
-        alert(json.error?.message ?? 'Error al desactivar');
+        showPageAlert('error', 'No se pudo desactivar la tienda.', json.error?.message ?? undefined);
         return;
       }
       if (selectedStore?.store_id === store.store_id) setSelectedStore(null);
+      showPageAlert('success', `Tienda "${store.name}" desactivada.`);
       load();
     } catch {
-      alert('Error de conexión');
+      showPageAlert('error', 'Error de conexion.', 'No se pudo desactivar la tienda.');
     }
   }
 
   async function handleTriggerScrape(store: StoreRow) {
     setScrapeResult(null);
+    setScrapingStoreId(store.store_id);
     try {
       const res = await fetch(`/api/v1/admin/stores/${store.store_id}/scrape`, {
         method: 'POST',
@@ -311,6 +335,8 @@ export default function AdminStoresPage() {
       if (selectedStore?.store_id === store.store_id) loadLinks(store.store_id);
     } catch {
       setScrapeResult('Error de conexión');
+    } finally {
+      setScrapingStoreId(null);
     }
   }
 
@@ -385,101 +411,6 @@ export default function AdminStoresPage() {
     }
   }
 
-  async function handleCreatePresetStore(preset: { name: string; url: string; platform: string }) {
-    setCreatingPreset(true);
-    try {
-      const existing = stores.find((s) => {
-        try {
-          if (!s.url) return false;
-          const a = new URL(s.url).hostname.toLowerCase();
-          const b = new URL(preset.url).hostname.toLowerCase();
-          return a === b || a.includes(b) || b.includes(a);
-        } catch {
-          return false;
-        }
-      });
-      if (existing) {
-        setSelectedStore(existing);
-        await loadLinks(existing.store_id);
-        return;
-      }
-
-      const res = await fetch('/api/v1/admin/stores', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: preset.name,
-          url: preset.url,
-          scraper_type: 'web_scrape',
-          scraper_config: { platform: preset.platform, default_currency: 'CLP' },
-        }),
-      });
-      const json = await res.json();
-      if (!json.ok) {
-        alert(json.error?.message ?? 'No se pudo crear la tienda');
-        return;
-      }
-
-      const created = json.data as StoreRow | null;
-      if (created) {
-        setSelectedStore(created);
-        await loadLinks(created.store_id);
-      }
-      await load();
-    } catch {
-      alert('Error de conexion');
-    } finally {
-      setCreatingPreset(false);
-    }
-  }
-
-  async function handleCreateAllPresetStores() {
-    setCreatingPreset(true);
-    try {
-      const existingHosts = new Set(
-        stores
-          .map((s) => s.url)
-          .filter((u): u is string => !!u)
-          .map((u) => {
-            try {
-              return new URL(u).hostname.toLowerCase();
-            } catch {
-              return '';
-            }
-          })
-          .filter(Boolean),
-      );
-
-      for (const preset of STORE_PRESETS) {
-        const presetHost = new URL(preset.url).hostname.toLowerCase();
-        if (existingHosts.has(presetHost)) continue;
-
-        const res = await fetch('/api/v1/admin/stores', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            name: preset.name,
-            url: preset.url,
-            scraper_type: 'web_scrape',
-            scraper_config: { platform: preset.platform, default_currency: 'CLP' },
-          }),
-        });
-        const json = await res.json();
-        if (!json.ok) {
-          // Continue with next store; report at the end.
-          console.error('preset create failed', preset.name, json.error?.message);
-          continue;
-        }
-      }
-
-      await load();
-    } catch {
-      alert('Error de conexion');
-    } finally {
-      setCreatingPreset(false);
-    }
-  }
-
   // ---- Links panel ----
 
   const loadLinks = useCallback(async (storeId: string) => {
@@ -546,15 +477,31 @@ export default function AdminStoresPage() {
     }
   }
 
-  function openAddLink() {
+  const resetAddLinkState = useCallback((prefill?: { productUrl?: string; productName?: string }) => {
     setLinkSearch('');
     setLinkSearchResults([]);
+    setLinkSearching(false);
     setSelectedCard(null);
     setCardPrintings([]);
+    setCardPrintingsLoading(false);
     setSelectedPrintingId(null);
     setCreateReprint(false);
-    setLinkProductUrl('');
-    setLinkProductName('');
+    setLinkProductUrl(prefill?.productUrl ?? '');
+    setLinkProductName(prefill?.productName ?? '');
+    setAddLinkProgress(null);
+    setAddLinkError(null);
+  }, []);
+
+  function openAddLink() {
+    resetAddLinkState();
+    setAddLinkOpen(true);
+  }
+
+  function openAddLinkFromQuickScrape() {
+    resetAddLinkState({
+      productUrl: quickUrl.trim(),
+      productName: quickResult?.name ?? '',
+    });
     setAddLinkOpen(true);
   }
 
@@ -577,7 +524,17 @@ export default function AdminStoresPage() {
 
   async function handleAddLink() {
     if (!selectedStore || !selectedCard || !selectedPrintingId || !linkProductUrl.trim()) return;
+    const normalizedNewUrl = normalizeProductUrl(linkProductUrl);
+    const hasDuplicateInList = links.some(
+      (link) => normalizeProductUrl(link.product_url) === normalizedNewUrl,
+    );
+    if (hasDuplicateInList) {
+      setAddLinkError('Esta URL ya esta vinculada a la tienda seleccionada.');
+      return;
+    }
     setAddingLink(true);
+    setAddLinkError(null);
+    setAddLinkProgress('Vinculando producto a la carta...');
     try {
       let printingId = selectedPrintingId;
       const productName = linkProductName.trim();
@@ -629,15 +586,23 @@ export default function AdminStoresPage() {
       });
       const json = await res.json();
       if (!json.ok) {
-        alert(json.error?.message ?? 'Error al agregar link');
+        setAddLinkError(json.error?.message ?? 'Error al agregar link');
+        setAddLinkProgress(null);
         return;
       }
 
-      // Trigger immediate scrape for this printing so price appears right away
+      const createdLinkId: string | undefined = json.data?.store_printing_link_id;
+
+      // Trigger immediate scrape only for the created link so price appears right away.
+      setAddLinkProgress('Actualizando precio del nuevo link...');
       const scrapeRes = await fetch(`/api/v1/admin/stores/${selectedStore.store_id}/scrape`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scope: 'single', card_printing_id: printingId }),
+        body: JSON.stringify({
+          scope: 'single',
+          card_printing_id: printingId,
+          store_printing_link_id: createdLinkId,
+        }),
       });
       const scrapeJson = await scrapeRes.json().catch(() => null);
       if (scrapeJson?.ok) {
@@ -645,13 +610,18 @@ export default function AdminStoresPage() {
         if (exec) {
           setScrapeResult(`Precio actualizado al instante: ${exec.success}/${exec.total} exitosos`);
         }
+      } else {
+        setScrapeResult(scrapeJson?.error?.message ?? 'El link se guardó, pero falló el scrape inmediato.');
       }
 
+      setAddLinkProgress('Link creado y scrape ejecutado.');
       setAddLinkOpen(false);
       setCreateReprint(false);
+      setAddLinkProgress(null);
       await loadLinks(selectedStore.store_id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error de conexion');
+      setAddLinkError(err instanceof Error ? err.message : 'Error de conexion');
+      setAddLinkProgress(null);
     } finally {
       setAddingLink(false);
     }
@@ -666,12 +636,13 @@ export default function AdminStoresPage() {
       });
       const json = await res.json();
       if (!json.ok) {
-        alert(json.error?.message ?? 'Error al eliminar');
+        showPageAlert('error', 'No se pudo eliminar el link.', json.error?.message ?? undefined);
         return;
       }
+      showPageAlert('success', 'Link eliminado correctamente.');
       loadLinks(selectedStore.store_id);
     } catch {
-      alert('Error de conexión');
+      showPageAlert('error', 'Error de conexion.', 'No se pudo eliminar el link.');
     }
   }
 
@@ -783,7 +754,14 @@ export default function AdminStoresPage() {
 
       <Separator />
 
-      
+      {pageAlert ? (
+        <AppAlert
+          variant={pageAlert.variant}
+          title={pageAlert.title}
+          description={pageAlert.description}
+          onClose={() => setPageAlert(null)}
+        />
+      ) : null}
 
       {/* Quick scrape playground */}
       <div className="rounded-lg border border-border/60 bg-card/70 p-4 space-y-3">
@@ -808,11 +786,14 @@ export default function AdminStoresPage() {
             className="flex-1"
           />
         </div>
-        {quickError && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {quickError}
-          </div>
-        )}
+        {quickError ? (
+          <AppAlert
+            variant="error"
+            title="No se pudo completar el scrape rapido."
+            description={quickError}
+            onClose={() => setQuickError(null)}
+          />
+        ) : null}
         {quickResult && (
           <div className="rounded-md border border-border/60 bg-muted/20 p-3">
             <div className="flex items-start gap-3">
@@ -851,13 +832,15 @@ export default function AdminStoresPage() {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    setLinkProductUrl(quickUrl.trim());
-                    setLinkProductName(quickResult.name ?? '');
                     if (!selectedStore) {
-                      alert('Selecciona una tienda en la lista para vincular.');
+                      showPageAlert(
+                        'warning',
+                        'Selecciona una tienda antes de vincular.',
+                        'El link rapido necesita una tienda activa seleccionada.',
+                      );
                       return;
                     }
-                    setAddLinkOpen(true);
+                    openAddLinkFromQuickScrape();
                   }}
                 >
                   Vincular a carta
@@ -877,14 +860,13 @@ export default function AdminStoresPage() {
         )}
       </div>
 
-      {scrapeResult && (
-        <div className="rounded-lg border border-border bg-muted/50 p-3 text-sm">
-          {scrapeResult}
-          <button onClick={() => setScrapeResult(null)} className="ml-2 text-muted-foreground hover:text-foreground">
-            <X className="inline h-3 w-3" />
-          </button>
-        </div>
-      )}
+      {scrapeResult ? (
+        <AppAlert
+          variant={scrapeResult.toLowerCase().startsWith('error') ? 'error' : 'success'}
+          title={scrapeResult}
+          onClose={() => setScrapeResult(null)}
+        />
+      ) : null}
 
       {/* Main layout: store list + links panel */}
       <div className="flex gap-6">
@@ -945,8 +927,19 @@ export default function AdminStoresPage() {
                 </div>
 
                 <div className="flex items-center gap-1">
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleTriggerScrape(store); }} title="Scrape ahora">
-                    <Zap className="mr-1 h-3 w-3" />Scrape
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => { e.stopPropagation(); handleTriggerScrape(store); }}
+                    title="Scrape ahora"
+                    disabled={scrapingStoreId !== null}
+                  >
+                    {scrapingStoreId === store.store_id ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Zap className="mr-1 h-3 w-3" />
+                    )}
+                    Scrape
                   </Button>
                   <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditDialog(store); }} title="Editar">
                     <Settings className="h-4 w-4" />
@@ -978,157 +971,57 @@ export default function AdminStoresPage() {
                 <p className="text-xs text-muted-foreground">{linksTotal} productos vinculados</p>
               </div>
               <div className="flex gap-2">
-                <Dialog open={addLinkOpen} onOpenChange={setAddLinkOpen}>
-                  <DialogTrigger asChild>
+                <StoreLinkDialog
+                  open={addLinkOpen}
+                  onOpenChange={(open) => {
+                    setAddLinkOpen(open);
+                    if (!open) {
+                      resetAddLinkState();
+                    }
+                  }}
+                  storeName={selectedStore.name}
+                  linkSearch={linkSearch}
+                  onChangeLinkSearch={(value) => {
+                    setLinkSearch(value);
+                    void searchCards(value);
+                  }}
+                  linkSearching={linkSearching}
+                  linkSearchResults={linkSearchResults}
+                  selectedCard={selectedCard}
+                  onSelectCard={(item) => {
+                    setSelectedCard(item);
+                    setLinkProductName(item.card.name);
+                    void loadPrintings(item.card.card_id);
+                  }}
+                  onClearSelectedCard={() => {
+                    setSelectedCard(null);
+                    setCardPrintings([]);
+                    setSelectedPrintingId(null);
+                    setCreateReprint(false);
+                  }}
+                  cardPrintings={cardPrintings}
+                  cardPrintingsLoading={cardPrintingsLoading}
+                  selectedPrintingId={selectedPrintingId}
+                  onSelectPrinting={(printingId) => setSelectedPrintingId(printingId)}
+                  linkProductUrl={linkProductUrl}
+                  onChangeLinkProductUrl={setLinkProductUrl}
+                  linkProductName={linkProductName}
+                  onChangeLinkProductName={setLinkProductName}
+                  createReprint={createReprint}
+                  onChangeCreateReprint={setCreateReprint}
+                  addLinkProgress={addLinkProgress}
+                  addLinkError={addLinkError}
+                  onClearAddLinkError={() => setAddLinkError(null)}
+                  onSubmit={handleAddLink}
+                  isSubmitting={addingLink}
+                  canSubmit={!!selectedPrintingId && !!linkProductUrl.trim()}
+                  quickContext={quickResult ? { ...quickResult, source_url: quickUrl.trim() } : null}
+                  trigger={(
                     <Button size="sm" onClick={openAddLink}>
                       <Plus className="mr-1 h-3 w-3" />Agregar Link
                     </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-lg">
-  <DialogHeader>
-    <DialogTitle>Vincular Producto</DialogTitle>
-    <DialogDescription>
-      Busca una carta e impresion, y vincula su URL del producto en {selectedStore.name}.
-    </DialogDescription>
-  </DialogHeader>
-  <div className="space-y-4 py-4">
-    <div className="space-y-2">
-      <Label>Buscar carta</Label>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={linkSearch}
-          onChange={(e) => {
-            setLinkSearch(e.target.value);
-            void searchCards(e.target.value);
-          }}
-          placeholder="Nombre de la carta..."
-          className="pl-9"
-        />
-      </div>
-      {linkSearching ? <p className="text-xs text-muted-foreground">Buscando...</p> : null}
-      {linkSearchResults.length > 0 && !selectedCard ? (
-        <div className="max-h-48 overflow-y-auto rounded-md border border-border">
-          {linkSearchResults.map((item) => (
-            <button
-              key={item.card_printing_id}
-              type="button"
-              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 transition-colors"
-              onClick={() => {
-                setSelectedCard(item);
-                setLinkProductName(item.card.name);
-                void loadPrintings(item.card.card_id);
-              }}
-            >
-              {item.image_url ? (
-                <img src={item.image_url} alt="" className="h-10 w-7 rounded object-cover" />
-              ) : null}
-              <div>
-                <span className="text-sm font-medium">{item.card.name}</span>
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {item.edition.name}
-                  {item.rarity_tier ? ` - ${item.rarity_tier.name}` : ''}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {selectedCard ? (
-        <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2">
-          <Package className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium">{selectedCard.card.name}</span>
-          <span className="text-xs text-muted-foreground">{selectedCard.edition.name}</span>
-          <button
-            onClick={() => {
-              setSelectedCard(null);
-              setCardPrintings([]);
-              setSelectedPrintingId(null);
-              setCreateReprint(false);
-            }}
-            className="ml-auto"
-          >
-            <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-          </button>
-        </div>
-      ) : null}
-    </div>
-
-    {selectedCard ? (
-      <div className="space-y-2">
-        <Label>Impresion</Label>
-        {cardPrintingsLoading ? (
-          <p className="text-xs text-muted-foreground">Cargando impresiones...</p>
-        ) : cardPrintings.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No hay impresiones disponibles.</p>
-        ) : (
-          <div className="max-h-44 space-y-2 overflow-y-auto rounded-md border border-border p-2">
-            {cardPrintings.map((p) => (
-              <label key={p.card_printing_id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="selected-printing"
-                  checked={selectedPrintingId === p.card_printing_id}
-                  onChange={() => setSelectedPrintingId(p.card_printing_id)}
+                  )}
                 />
-                <span className="font-medium">{p.edition?.name ?? 'Edicion'}</span>
-                {p.collector_number ? (
-                  <span className="text-xs text-muted-foreground">#{p.collector_number}</span>
-                ) : null}
-                {p.printing_variant ? (
-                  <span className="text-xs text-muted-foreground">- {p.printing_variant}</span>
-                ) : null}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
-    ) : null}
-
-    <div className="space-y-2">
-      <Label htmlFor="link-url">URL del producto *</Label>
-      <Input
-        id="link-url"
-        value={linkProductUrl}
-        onChange={(e) => setLinkProductUrl(e.target.value)}
-        placeholder="https://tienda.cl/producto/carta-xyz"
-      />
-    </div>
-
-    <div className="space-y-2">
-      <Label htmlFor="link-name">Nombre del producto (opcional)</Label>
-      <Input
-        id="link-name"
-        value={linkProductName}
-        onChange={(e) => setLinkProductName(e.target.value)}
-        placeholder="Se auto-detectara al hacer scrape"
-      />
-      <div className="flex items-center gap-2">
-        <input
-          id="create-reprint"
-          type="checkbox"
-          checked={createReprint}
-          onChange={(e) => setCreateReprint(e.target.checked)}
-          disabled={!selectedPrintingId}
-          className="h-4 w-4 accent-primary"
-        />
-        <Label htmlFor="create-reprint" className="text-xs text-muted-foreground">
-          Crear reimpresion cuando el nombre del producto difiere
-        </Label>
-      </div>
-    </div>
-  </div>
-  <DialogFooter>
-    <Button variant="outline" onClick={() => setAddLinkOpen(false)}>Cancelar</Button>
-    <Button
-      onClick={handleAddLink}
-      disabled={addingLink || !selectedPrintingId || !linkProductUrl.trim()}
-    >
-      {addingLink ? 'Agregando...' : 'Agregar'}
-    </Button>
-  </DialogFooter>
-</DialogContent>
-                </Dialog>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedStore(null)} title="Cerrar">
                   <X className="h-4 w-4" />
                 </Button>
@@ -1212,7 +1105,3 @@ export default function AdminStoresPage() {
     </div>
   );
 }
-
-
-
-

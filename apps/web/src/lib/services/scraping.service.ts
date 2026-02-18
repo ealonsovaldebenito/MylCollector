@@ -5,6 +5,7 @@
  * Doc reference: 03_DATA_MODEL_SQL.md, 05_PRICING_SCRAPING_COMMUNITY.md
  *
  * Changelog:
+ *   2026-02-19 — Scope `single` ahora respeta `store_printing_link_id` y evita scrape global.
  *   2026-02-16 — Initial creation
  */
 
@@ -121,8 +122,12 @@ export async function triggerScrape(
     .eq('store_id', storeId)
     .eq('is_active', true);
 
-  if (input.scope === 'single' && input.card_printing_id) {
-    linksQuery = linksQuery.eq('card_printing_id', input.card_printing_id);
+  if (input.scope === 'single') {
+    if (input.store_printing_link_id) {
+      linksQuery = linksQuery.eq('store_printing_link_id', input.store_printing_link_id);
+    } else if (input.card_printing_id) {
+      linksQuery = linksQuery.eq('card_printing_id', input.card_printing_id);
+    }
   }
 
   const { data: links, error: linksErr } = await linksQuery;
@@ -299,6 +304,7 @@ interface ExecutionResult {
 export async function executeScrapeJob(
   supabase: Client,
   jobId: string,
+  input?: TriggerScrape,
 ): Promise<ExecutionResult> {
   // 1. Get the job
   const { data: job } = await supabase
@@ -337,11 +343,21 @@ export async function executeScrapeJob(
     .eq('scrape_job_id', jobId);
 
   // 4. Get the printing links to scrape
-  const { data: links } = await supabase
+  let linksQuery = supabase
     .from('store_printing_links')
     .select('store_printing_link_id, card_printing_id, product_url')
     .eq('store_id', job.store_id)
     .eq('is_active', true);
+
+  if (input?.scope === 'single') {
+    if (input.store_printing_link_id) {
+      linksQuery = linksQuery.eq('store_printing_link_id', input.store_printing_link_id);
+    } else if (input.card_printing_id) {
+      linksQuery = linksQuery.eq('card_printing_id', input.card_printing_id);
+    }
+  }
+
+  const { data: links } = await linksQuery;
 
   const allLinks = links ?? [];
   let success = 0;

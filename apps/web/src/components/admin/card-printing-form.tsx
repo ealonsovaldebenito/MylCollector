@@ -1,17 +1,30 @@
+/**
+ * CardPrintingForm - Admin create/edit UI for card printings.
+ *
+ * Scope:
+ * - Edit printing metadata (variant, edition, rarity, legal status, collector, illustrator).
+ * - Replace image via upload or set image URL directly.
+ * - Delete printing from edit view with explicit confirmation.
+ *
+ * Changelog:
+ *   2026-02-18 - Added variant/image URL editing and delete action in edit mode.
+ *   2026-02-18 - Improved metadata panel for quick inspection and copyable IDs.
+ */
+
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Edition, RarityTier, Block } from '@myl/shared';
-import { createCardPrintingSchema, updateCardPrintingSchema, editionDisplayName } from '@myl/shared';
+import type { Block, Edition, RarityTier } from '@myl/shared';
+import { createCardPrintingSchema, editionDisplayName, updateCardPrintingSchema } from '@myl/shared';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
 import { ImageUpload } from './image-upload';
-import { Loader2, Save, Copy } from 'lucide-react';
+import { Copy, ExternalLink, Loader2, Save, Trash2 } from 'lucide-react';
 
 interface CardPrintingFormData {
   card_printing_id?: string;
@@ -45,6 +58,7 @@ export function CardPrintingForm({
 }: CardPrintingFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
@@ -56,16 +70,16 @@ export function CardPrintingForm({
       collector_number: '',
       legal_status: 'LEGAL',
       printing_variant: 'standard',
+      image_url: '',
     },
   );
 
-  // Encontrar bloque de la edición seleccionada
   const selectedEdition = useMemo(
-    () => editions.find((e) => e.edition_id === form.edition_id),
+    () => editions.find((edition) => edition.edition_id === form.edition_id),
     [editions, form.edition_id],
   );
   const selectedBlock = useMemo(
-    () => blocks.find((b) => b.block_id === selectedEdition?.block_id),
+    () => blocks.find((block) => block.block_id === selectedEdition?.block_id),
     [blocks, selectedEdition],
   );
 
@@ -75,6 +89,31 @@ export function CardPrintingForm({
 
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text);
+  }
+
+  async function handleDelete() {
+    if (mode !== 'edit' || !printingId) return;
+    if (!confirm('Eliminar esta impresion? Esta accion no se puede deshacer.')) return;
+
+    setError(null);
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/v1/cards/${cardId}/printings/${printingId}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error?.message ?? 'No se pudo eliminar la impresion.');
+        return;
+      }
+
+      router.push(`/admin/cards/${cardId}/edit`);
+      router.refresh();
+    } catch {
+      setError('Error de conexion al eliminar la impresion.');
+    } finally {
+      setIsDeleting(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -88,13 +127,14 @@ export function CardPrintingForm({
       illustrator: form.illustrator || undefined,
       collector_number: form.collector_number || undefined,
       legal_status: form.legal_status,
-      printing_variant: form.printing_variant || 'standard',
+      printing_variant: form.printing_variant.trim() || 'standard',
+      image_url: form.image_url?.trim() || undefined,
     };
 
     const schema = mode === 'create' ? createCardPrintingSchema : updateCardPrintingSchema;
     const parsed = schema.safeParse(payload);
     if (!parsed.success) {
-      setError(parsed.error.issues.map((i) => i.message).join(', '));
+      setError(parsed.error.issues.map((issue) => issue.message).join(', '));
       return;
     }
 
@@ -111,28 +151,28 @@ export function CardPrintingForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(parsed.data),
       });
-
       const json = await res.json();
       if (!json.ok) {
-        setError(json.error?.message ?? 'Error al guardar printing');
+        setError(json.error?.message ?? 'Error al guardar impresion.');
         return;
       }
 
       const finalPrintingId = mode === 'create' ? json.data.card_printing_id : printingId;
 
-      // Upload image if provided
-      if (imageFile) {
+      if (imageFile && finalPrintingId) {
         const formData = new FormData();
         formData.append('file', imageFile);
 
-        const imgRes = await fetch(`/api/v1/cards/${cardId}/printings/${finalPrintingId}/image`, {
+        const imageRes = await fetch(`/api/v1/cards/${cardId}/printings/${finalPrintingId}/image`, {
           method: 'POST',
           body: formData,
         });
-        const imgJson = await imgRes.json();
-        if (!imgJson.ok) {
+        const imageJson = await imageRes.json();
+        if (!imageJson.ok) {
           setError(
-            `Printing ${mode === 'create' ? 'creado' : 'actualizado'}, pero fallo la subida de imagen`,
+            `Impresion guardada, pero fallo la subida de imagen: ${
+              imageJson.error?.message ?? 'error desconocido'
+            }`,
           );
           return;
         }
@@ -149,90 +189,134 @@ export function CardPrintingForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {error && (
+      {error ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
-      )}
+      ) : null}
 
-      {/* Printing ID (en modo edición) */}
-      {mode === 'edit' && form.card_printing_id && (
+      {mode === 'edit' && form.card_printing_id ? (
         <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-xs text-muted-foreground">ID de Impresión</Label>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">ID de impresion</Label>
               <p className="font-mono text-sm font-medium">{form.card_printing_id}</p>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => copyToClipboard(form.card_printing_id!)}
-              title="Copiar ID"
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{form.printing_variant || 'standard'}</Badge>
+              <Badge
+                variant={
+                  form.legal_status === 'LEGAL'
+                    ? 'default'
+                    : form.legal_status === 'RESTRICTED'
+                      ? 'secondary'
+                      : 'destructive'
+                }
+              >
+                {form.legal_status}
+              </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => copyToClipboard(form.card_printing_id!)}
+                title="Copiar ID"
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Left: image upload */}
-        <div className="space-y-1.5">
-          <Label>Imagen de la carta</Label>
-          <ImageUpload value={form.image_url ?? null} onChange={setImageFile} />
-          {form.image_url && !imageFile && (
-            <p className="text-xs text-muted-foreground">Imagen actual guardada</p>
-          )}
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Imagen de la impresion</Label>
+            <ImageUpload value={form.image_url ?? null} onChange={setImageFile} />
+            {form.image_url && !imageFile ? (
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-muted-foreground">Imagen actual guardada.</p>
+                <Button type="button" variant="link" className="h-auto p-0 text-xs" asChild>
+                  <a href={form.image_url} target="_blank" rel="noreferrer">
+                    Abrir <ExternalLink className="ml-1 h-3 w-3" />
+                  </a>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="image_url">URL de imagen (opcional)</Label>
+            <Input
+              id="image_url"
+              value={form.image_url ?? ''}
+              onChange={(e) => update('image_url', e.target.value)}
+              placeholder="https://..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Si subes archivo y URL, prevalece el archivo subido.
+            </p>
+          </div>
         </div>
 
-        {/* Right: fields */}
         <div className="space-y-4">
-          {/* Edition */}
+          <div className="space-y-1.5">
+            <Label htmlFor="printing_variant">Nombre de impresion *</Label>
+            <Input
+              id="printing_variant"
+              value={form.printing_variant}
+              onChange={(e) => update('printing_variant', e.target.value)}
+              placeholder="standard, Full Art, Foil Lluvia..."
+            />
+          </div>
+
           <div className="space-y-1.5">
             <Label>Edicion *</Label>
-            <Select value={form.edition_id} onValueChange={(v) => update('edition_id', v)}>
+            <Select value={form.edition_id} onValueChange={(value) => update('edition_id', value)}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar edicion" />
               </SelectTrigger>
               <SelectContent>
-                {editions.map((e) => (
-                  <SelectItem key={e.edition_id} value={e.edition_id}>
-                    {editionDisplayName(e.name)} · {e.code}
+                {editions.map((edition) => (
+                  <SelectItem key={edition.edition_id} value={edition.edition_id}>
+                    {editionDisplayName(edition.name)} - {edition.code}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {selectedEdition && selectedBlock && (
+            {selectedEdition && selectedBlock ? (
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-xs">
                   Bloque: {selectedBlock.name}
                 </Badge>
+                <Badge variant="outline" className="text-xs">
+                  Codigo: {selectedEdition.code}
+                </Badge>
               </div>
-            )}
+            ) : null}
           </div>
 
-          {/* Rarity */}
           <div className="space-y-1.5">
             <Label>Rareza</Label>
             <Select
-              value={form.rarity_tier_id ?? ''}
-              onValueChange={(v) => update('rarity_tier_id', v || undefined)}
+              value={form.rarity_tier_id ?? '__none__'}
+              onValueChange={(value) => update('rarity_tier_id', value === '__none__' ? undefined : value)}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar rareza" />
               </SelectTrigger>
               <SelectContent>
-                {rarities.map((r) => (
-                  <SelectItem key={r.rarity_tier_id} value={r.rarity_tier_id}>
-                    {r.name}
+                <SelectItem value="__none__">Sin rareza</SelectItem>
+                {rarities.map((rarity) => (
+                  <SelectItem key={rarity.rarity_tier_id} value={rarity.rarity_tier_id}>
+                    {rarity.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Illustrator */}
           <div className="space-y-1.5">
             <Label htmlFor="illustrator">Ilustrador</Label>
             <Input
@@ -243,7 +327,6 @@ export function CardPrintingForm({
             />
           </div>
 
-          {/* Collector number */}
           <div className="space-y-1.5">
             <Label htmlFor="collector_number">Numero de coleccion</Label>
             <Input
@@ -254,18 +337,17 @@ export function CardPrintingForm({
             />
           </div>
 
-          {/* Legal status */}
           <div className="space-y-1.5">
             <Label>Estado legal *</Label>
-            <Select value={form.legal_status} onValueChange={(v) => update('legal_status', v)}>
+            <Select value={form.legal_status} onValueChange={(value) => update('legal_status', value)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="LEGAL">✅ Legal</SelectItem>
-                <SelectItem value="RESTRICTED">⚠️ Restringida</SelectItem>
-                <SelectItem value="BANNED">🚫 Prohibida</SelectItem>
-                <SelectItem value="DISCONTINUED">⏸️ Discontinuada</SelectItem>
+                <SelectItem value="LEGAL">Legal</SelectItem>
+                <SelectItem value="RESTRICTED">Restringida</SelectItem>
+                <SelectItem value="BANNED">Prohibida</SelectItem>
+                <SelectItem value="DISCONTINUED">Discontinuada</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -274,19 +356,39 @@ export function CardPrintingForm({
 
       <Separator />
 
-      {/* Submit */}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={() => router.back()}>
-          Cancelar
-        </Button>
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          {mode === 'create' ? 'Crear printing' : 'Guardar cambios'}
-        </Button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          {mode === 'edit' ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              disabled={isSubmitting || isDeleting}
+              onClick={handleDelete}
+            >
+              {isDeleting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-2 h-4 w-4" />
+              )}
+              Eliminar impresion
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting || isDeleting}>
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={isSubmitting || isDeleting}>
+            {isSubmitting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {mode === 'create' ? 'Crear impresion' : 'Guardar cambios'}
+          </Button>
+        </div>
       </div>
     </form>
   );
