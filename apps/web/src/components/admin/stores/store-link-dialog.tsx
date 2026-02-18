@@ -45,6 +45,7 @@ interface CardSearchResult {
   card: { card_id: string; name: string };
   edition: { name: string; code: string };
   rarity_tier: { name: string } | null;
+  printing_variant: string | null;
 }
 
 interface PrintingOption {
@@ -192,6 +193,7 @@ export function StoreLinkDialog({
                         <p className="truncate text-xs text-muted-foreground">
                           {item.edition.name}
                           {item.rarity_tier ? ` - ${item.rarity_tier.name}` : ''}
+                          {item.printing_variant ? ` - ${item.printing_variant}` : ''}
                         </p>
                       </div>
                     </button>
@@ -209,6 +211,7 @@ export function StoreLinkDialog({
                     <p className="truncate text-xs text-muted-foreground">
                       {selectedCard.edition.name}
                       {selectedCard.rarity_tier ? ` - ${selectedCard.rarity_tier.name}` : ''}
+                      {selectedCard.printing_variant ? ` - ${selectedCard.printing_variant}` : ''}
                     </p>
                   </div>
                   <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={onClearSelectedCard}>

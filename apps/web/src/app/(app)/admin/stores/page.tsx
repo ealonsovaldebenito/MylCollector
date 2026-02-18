@@ -1,14 +1,16 @@
-/**
- * Admin Stores Page — CRUD for stores with scraping config + printing links.
+﻿/**
+ * Admin Stores Page â€” CRUD for stores with scraping config + printing links.
  * Allows creating/editing stores, managing product links, triggering scrapes.
  *
  * Changelog:
- *   2026-02-16 — Initial creation
- *   2026-02-16 — Added platform selector + scrape execution
- *   2026-02-16 — Added store printing links management panel
- *   2026-02-19 — Refactor: modal de vinculación extraído a componente modular.
- *   2026-02-19 — Scrape automático tras vincular link ahora procesa solo el último link añadido.
- *   2026-02-19 — UX: estados visuales de progreso/errores para scraping y vinculación.
+ *   2026-02-16 â€” Initial creation
+ *   2026-02-16 â€” Added platform selector + scrape execution
+ *   2026-02-16 â€” Added store printing links management panel
+ *   2026-02-19 â€” Refactor: modal de vinculaciÃ³n extraÃ­do a componente modular.
+ *   2026-02-19 â€” Scrape automÃ¡tico tras vincular link ahora procesa solo el Ãºltimo link aÃ±adido.
+ *   2026-02-19 â€” UX: estados visuales de progreso/errores para scraping y vinculaciÃ³n.
+ *   2026-02-18 â€” Nueva tab "Scrapping Masivo" con componente aislado para importacion por lotes.
+ *   2026-02-18 â€” Scrape de tienda: indicador en vivo + elapsed time + timeout cliente.
  */
 'use client';
 
@@ -33,7 +35,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { StoreLinkDialog } from '@/components/admin/stores/store-link-dialog';
+import { MassScrapingTab } from '@/components/admin/stores/mass-scraping-tab';
 import { AppAlert, type AppAlertVariant } from '@/components/ui/app-alert';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // ============================================================================
 // Types
@@ -79,6 +83,7 @@ interface CardSearchResult {
   card: { card_id: string; name: string };
   edition: { name: string; code: string };
   rarity_tier: { name: string } | null;
+  printing_variant: string | null;
 }
 
 interface ScrapePreview {
@@ -165,6 +170,8 @@ export default function AdminStoresPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<string | null>(null);
   const [scrapingStoreId, setScrapingStoreId] = useState<string | null>(null);
+  const [scrapeStartedAt, setScrapeStartedAt] = useState<number | null>(null);
+  const [scrapeElapsedSec, setScrapeElapsedSec] = useState(0);
 
   // Links panel state
   const [selectedStore, setSelectedStore] = useState<StoreRow | null>(null);
@@ -200,6 +207,7 @@ export default function AdminStoresPage() {
     title: string;
     description?: string;
   } | null>(null);
+  const [activeTab, setActiveTab] = useState<'stores' | 'mass-scraping'>('stores');
 
   const showPageAlert = useCallback(
     (variant: AppAlertVariant, title: string, description?: string) => {
@@ -222,13 +230,24 @@ export default function AdminStoresPage() {
       }
       setStores(json.data.items ?? []);
     } catch {
-      setError('Error de conexión');
+      setError('Error de conexiÃ³n');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!scrapingStoreId || !scrapeStartedAt) {
+      setScrapeElapsedSec(0);
+      return;
+    }
+    const tick = () => setScrapeElapsedSec(Math.max(0, Math.floor((Date.now() - scrapeStartedAt) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [scrapingStoreId, scrapeStartedAt]);
 
   function openCreateDialog() {
     setEditingStore(null);
@@ -292,7 +311,7 @@ export default function AdminStoresPage() {
   }
 
   async function handleDeactivate(store: StoreRow) {
-    if (!confirm(`¿Desactivar la tienda "${store.name}"?`)) return;
+    if (!confirm(`Â¿Desactivar la tienda "${store.name}"?`)) return;
     try {
       const res = await fetch(`/api/v1/admin/stores/${store.store_id}`, { method: 'DELETE' });
       const json = await res.json();
@@ -311,12 +330,17 @@ export default function AdminStoresPage() {
   async function handleTriggerScrape(store: StoreRow) {
     setScrapeResult(null);
     setScrapingStoreId(store.store_id);
+    setScrapeStartedAt(Date.now());
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
       const res = await fetch(`/api/v1/admin/stores/${store.store_id}/scrape`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ scope: 'all' }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const json = await res.json();
       if (!json.ok) {
         setScrapeResult(`Error: ${json.error?.message ?? 'Error al iniciar scraping'}`);
@@ -325,18 +349,23 @@ export default function AdminStoresPage() {
       const exec = json.data?.execution;
       if (exec) {
         setScrapeResult(
-          `Scrape completado — ${exec.success}/${exec.total} exitosos` +
+          `Scrape completado - ${exec.success}/${exec.total} exitosos` +
           (exec.failed > 0 ? `, ${exec.failed} fallidos` : ''),
         );
       } else {
-        setScrapeResult(`Job creado — ${json.data.links_count} links a procesar`);
+        setScrapeResult(`Job creado - ${json.data.links_count} links a procesar`);
       }
       load();
       if (selectedStore?.store_id === store.store_id) loadLinks(store.store_id);
-    } catch {
-      setScrapeResult('Error de conexión');
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        setScrapeResult('Scrape en curso por mucho tiempo. Refresca en unos minutos para ver precios actualizados.');
+      } else {
+        setScrapeResult('Error de conexion');
+      }
     } finally {
       setScrapingStoreId(null);
+      setScrapeStartedAt(null);
     }
   }
 
@@ -373,7 +402,7 @@ export default function AdminStoresPage() {
         }
       }
     } catch {
-      setQuickError('Error de conexión');
+      setQuickError('Error de conexiÃ³n');
     } finally {
       setQuickLoading(false);
     }
@@ -405,7 +434,7 @@ export default function AdminStoresPage() {
       }
       await load();
     } catch {
-      setQuickError('Error de conexión al crear tienda');
+      setQuickError('Error de conexiÃ³n al crear tienda');
     } finally {
       setCreatingSuggested(false);
     }
@@ -460,6 +489,7 @@ export default function AdminStoresPage() {
                 card: { card_id: item.card.card_id, name: item.card.name },
                 edition: { name: p.edition?.name ?? item.edition.name, code: p.edition?.code ?? item.edition.code },
                 rarity_tier: p.rarity_tier ? { name: p.rarity_tier.name } : item.rarity_tier,
+                printing_variant: p.printing_variant ?? null,
               })) as CardSearchResult[];
             } catch {
               return [item];
@@ -611,7 +641,7 @@ export default function AdminStoresPage() {
           setScrapeResult(`Precio actualizado al instante: ${exec.success}/${exec.total} exitosos`);
         }
       } else {
-        setScrapeResult(scrapeJson?.error?.message ?? 'El link se guardó, pero falló el scrape inmediato.');
+        setScrapeResult(scrapeJson?.error?.message ?? 'El link se guardÃ³, pero fallÃ³ el scrape inmediato.');
       }
 
       setAddLinkProgress('Link creado y scrape ejecutado.');
@@ -629,7 +659,7 @@ export default function AdminStoresPage() {
 
   async function handleDeleteLink(linkId: string) {
     if (!selectedStore) return;
-    if (!confirm('¿Eliminar este link?')) return;
+    if (!confirm('Â¿Eliminar este link?')) return;
     try {
       const res = await fetch(`/api/v1/admin/stores/${selectedStore.store_id}/links/${linkId}`, {
         method: 'DELETE',
@@ -664,16 +694,38 @@ export default function AdminStoresPage() {
     return <Badge variant="secondary" className="text-xs">{opt.label}</Badge>;
   };
 
+  const scrapingStoreName = scrapingStoreId
+    ? (stores.find((store) => store.store_id === scrapingStoreId)?.name ?? 'Tienda')
+    : null;
+
   // ---- Main render ----
 
   return (
     <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="font-display text-3xl font-bold">Tiendas</h1>
+        <p className="text-sm text-muted-foreground">
+          Gestiona tiendas, configura scrapers y vincula productos.
+        </p>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'stores' | 'mass-scraping')}>
+        <TabsList>
+          <TabsTrigger value="stores">Tiendas y Links</TabsTrigger>
+          <TabsTrigger value="mass-scraping">Scrapping Masivo</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {activeTab === 'mass-scraping' ? (
+        <MassScrapingTab stores={stores} />
+      ) : (
+        <>
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-bold">Tiendas</h1>
+          <h2 className="text-xl font-semibold">Gestion de Tiendas</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Gestiona tiendas, configura scrapers y vincula productos.
+            Herramientas de scraping individual y vinculacion manual.
           </p>
         </div>
         <div className="flex gap-2">
@@ -769,8 +821,8 @@ export default function AdminStoresPage() {
           <div className="flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-accent" />
             <div>
-              <p className="text-sm font-semibold">Scrape rápido</p>
-              <p className="text-xs text-muted-foreground">Prueba una URL, ve los datos y luego vincúlala a una carta.</p>
+              <p className="text-sm font-semibold">Scrape rÃ¡pido</p>
+              <p className="text-xs text-muted-foreground">Prueba una URL, ve los datos y luego vincÃºlala a una carta.</p>
             </div>
           </div>
           <Button size="sm" onClick={handleQuickScrape} disabled={quickLoading || !quickUrl.trim()}>
@@ -807,10 +859,10 @@ export default function AdminStoresPage() {
                 )}
               </div>
               <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-sm font-semibold truncate">{quickResult.name ?? 'Sin título'}</p>
+                <p className="text-sm font-semibold truncate">{quickResult.name ?? 'Sin tÃ­tulo'}</p>
                 <p className="text-xs text-muted-foreground">
-                  Precio: {quickResult.price !== null ? formatCLP(quickResult.price) : 'No detectado'} ·
-                  Moneda: {quickResult.currency} · {quickResult.available ? 'Disponible' : 'Sin stock'}
+                  Precio: {quickResult.price !== null ? formatCLP(quickResult.price) : 'No detectado'} Â·
+                  Moneda: {quickResult.currency} Â· {quickResult.available ? 'Disponible' : 'Sin stock'}
                 </p>
                 {quickResult.platform && (
                   <p className="text-[11px] text-muted-foreground">Plataforma: {quickResult.platform}</p>
@@ -868,6 +920,14 @@ export default function AdminStoresPage() {
         />
       ) : null}
 
+      {scrapingStoreId ? (
+        <AppAlert
+          variant="info"
+          title={`Scrape en progreso: ${scrapingStoreName ?? 'Tienda'}`}
+          description={`Procesando links... ${scrapeElapsedSec}s transcurridos.`}
+        />
+      ) : null}
+
       {/* Main layout: store list + links panel */}
       <div className="flex gap-6">
         {/* Store list */}
@@ -920,7 +980,7 @@ export default function AdminStoresPage() {
                         </span>
                       )}
                       {store.last_polled_at && (
-                        <span>Último poll: {new Date(store.last_polled_at).toLocaleDateString('es-CL')}</span>
+                        <span>Ãšltimo poll: {new Date(store.last_polled_at).toLocaleDateString('es-CL')}</span>
                       )}
                     </div>
                   </div>
@@ -1102,6 +1162,9 @@ export default function AdminStoresPage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
+
