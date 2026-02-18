@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Store, RefreshCw, Plus, ExternalLink, Trash2, Settings, Zap,
-  Globe, Clock, Link2, Search, X, ChevronRight, Package,
+  Globe, Clock, Link2, Search, X, ChevronRight, Package, Wand2, Image as ImageIcon, Loader2,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -76,11 +76,49 @@ interface CardSearchResult {
   rarity_tier: { name: string } | null;
 }
 
+interface ScrapePreview {
+  name: string | null;
+  price: number | null;
+  currency: string;
+  available: boolean;
+  image_url: string | null;
+  stock: number | null;
+  original_price: number | null;
+  store_id?: string | null;
+  store_name?: string | null;
+  platform?: string;
+}
+
+interface PrintingOption {
+  card_printing_id: string;
+  card_id: string;
+  edition_id: string;
+  rarity_tier_id: string | null;
+  image_url: string | null;
+  illustrator: string | null;
+  collector_number: string | null;
+  legal_status: string;
+  printing_variant: string | null;
+  edition: { edition_id: string; name: string; code: string };
+  rarity_tier?: { name: string; code: string } | null;
+}
+
 const PLATFORM_OPTIONS = [
   { value: 'woocommerce', label: 'WooCommerce', description: 'WordPress + WooCommerce (ArkanoGames)' },
   { value: 'tiendanube', label: 'TiendaNube', description: 'Nuvemshop (MercaderesStore)' },
   { value: 'jumpseller', label: 'Jumpseller', description: 'Jumpseller (PandoraStore)' },
-  { value: 'generic_og', label: 'Genérico (OG)', description: 'Cualquier tienda con meta tags OG' },
+  { value: 'generic_og', label: 'Generico (OG)', description: 'Cualquier tienda con meta tags OG' },
+];
+
+const STORE_PRESETS: Array<{ key: string; name: string; url: string; platform: string }> = [
+  { key: 'oneup', name: 'OneUpStore', url: 'https://www.oneupstore.cl', platform: 'woocommerce' },
+  { key: 'mylserena', name: 'MylSerena', url: 'https://mylserena.cl', platform: 'woocommerce' },
+  { key: 'reino', name: 'El Reino de los Duelos', url: 'https://singles.elreinodelosduelos.cl', platform: 'woocommerce' },
+  { key: 'minimarket', name: 'MinimarketTCG', url: 'https://minimarketcg.cl', platform: 'woocommerce' },
+  { key: 'gorila', name: 'GorilaTCG', url: 'https://www.gorilatcg.cl', platform: 'woocommerce' },
+  { key: 'pandora', name: 'PandoraStore', url: 'https://www.pandorastore.cl', platform: 'jumpseller' },
+  { key: 'laira', name: 'LairaCL', url: 'https://laira.cl', platform: 'generic_og' },
+  { key: 'camelot', name: 'Camelot TCG', url: 'https://camelotcg.cl', platform: 'woocommerce' },
 ];
 
 function formatCLP(price: number): string {
@@ -90,6 +128,14 @@ function formatCLP(price: number): string {
   }).format(price);
 }
 
+function normalizeName(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isManagedCardImageUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return url.includes('/storage/v1/object/public/card-images/');
+}
 // ============================================================================
 // Component
 // ============================================================================
@@ -122,10 +168,24 @@ export default function AdminStoresPage() {
   const [linkSearch, setLinkSearch] = useState('');
   const [linkSearchResults, setLinkSearchResults] = useState<CardSearchResult[]>([]);
   const [linkSearching, setLinkSearching] = useState(false);
-  const [selectedPrinting, setSelectedPrinting] = useState<CardSearchResult | null>(null);
+  const [selectedCard, setSelectedCard] = useState<CardSearchResult | null>(null);
+  const [cardPrintings, setCardPrintings] = useState<PrintingOption[]>([]);
+  const [cardPrintingsLoading, setCardPrintingsLoading] = useState(false);
+  const [selectedPrintingId, setSelectedPrintingId] = useState<string | null>(null);
+  const [createReprint, setCreateReprint] = useState(false);
   const [linkProductUrl, setLinkProductUrl] = useState('');
   const [linkProductName, setLinkProductName] = useState('');
   const [addingLink, setAddingLink] = useState(false);
+
+  // Quick scrape preview
+  const [quickUrl, setQuickUrl] = useState('');
+  const [quickResult, setQuickResult] = useState<ScrapePreview | null>(null);
+  const [quickLoading, setQuickLoading] = useState(false);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const [suggestedStore, setSuggestedStore] = useState<{ name: string; url: string; platform: string } | null>(null);
+  const [creatingSuggested, setCreatingSuggested] = useState(false);
+  const [selectedPresetKey, setSelectedPresetKey] = useState<string>('');
+  const [creatingPreset, setCreatingPreset] = useState(false);
 
   // ---- Store CRUD ----
 
@@ -254,6 +314,172 @@ export default function AdminStoresPage() {
     }
   }
 
+  async function handleQuickScrape() {
+    if (!quickUrl.trim()) return;
+    setQuickLoading(true);
+    setQuickError(null);
+    setQuickResult(null);
+    setSuggestedStore(null);
+    try {
+      const res = await fetch('/api/v1/admin/scrape/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: quickUrl.trim() }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setQuickError(json.error?.message ?? 'Error al scrapear');
+        return;
+      }
+      const result = json.data.result as ScrapePreview;
+      setQuickResult(result);
+      setSuggestedStore(json.data.suggested_store ?? null);
+      if (result?.name) setLinkProductName(result.name);
+      setLinkProductUrl(quickUrl.trim());
+
+      // Auto-select detected store if present
+      const detectedStoreId: string | undefined = json.data.store?.store_id ?? result?.store_id ?? undefined;
+      if (detectedStoreId) {
+        const found = stores.find((s) => s.store_id === detectedStoreId);
+        if (found) {
+          setSelectedStore(found);
+          loadLinks(detectedStoreId);
+        }
+      }
+    } catch {
+      setQuickError('Error de conexión');
+    } finally {
+      setQuickLoading(false);
+    }
+  }
+
+  async function handleCreateSuggestedStore() {
+    if (!suggestedStore) return;
+    setCreatingSuggested(true);
+    try {
+      const res = await fetch('/api/v1/admin/stores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: suggestedStore.name,
+          url: suggestedStore.url,
+          scraper_type: 'web_scrape',
+          scraper_config: { platform: suggestedStore.platform, default_currency: 'CLP' },
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setQuickError(json.error?.message ?? 'No se pudo crear la tienda');
+        return;
+      }
+      const created = json.data as StoreRow | null;
+      if (created) {
+        setSelectedStore(created);
+        loadLinks(created.store_id);
+      }
+      await load();
+    } catch {
+      setQuickError('Error de conexión al crear tienda');
+    } finally {
+      setCreatingSuggested(false);
+    }
+  }
+
+  async function handleCreatePresetStore(preset: { name: string; url: string; platform: string }) {
+    setCreatingPreset(true);
+    try {
+      const existing = stores.find((s) => {
+        try {
+          if (!s.url) return false;
+          const a = new URL(s.url).hostname.toLowerCase();
+          const b = new URL(preset.url).hostname.toLowerCase();
+          return a === b || a.includes(b) || b.includes(a);
+        } catch {
+          return false;
+        }
+      });
+      if (existing) {
+        setSelectedStore(existing);
+        await loadLinks(existing.store_id);
+        return;
+      }
+
+      const res = await fetch('/api/v1/admin/stores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: preset.name,
+          url: preset.url,
+          scraper_type: 'web_scrape',
+          scraper_config: { platform: preset.platform, default_currency: 'CLP' },
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        alert(json.error?.message ?? 'No se pudo crear la tienda');
+        return;
+      }
+
+      const created = json.data as StoreRow | null;
+      if (created) {
+        setSelectedStore(created);
+        await loadLinks(created.store_id);
+      }
+      await load();
+    } catch {
+      alert('Error de conexion');
+    } finally {
+      setCreatingPreset(false);
+    }
+  }
+
+  async function handleCreateAllPresetStores() {
+    setCreatingPreset(true);
+    try {
+      const existingHosts = new Set(
+        stores
+          .map((s) => s.url)
+          .filter((u): u is string => !!u)
+          .map((u) => {
+            try {
+              return new URL(u).hostname.toLowerCase();
+            } catch {
+              return '';
+            }
+          })
+          .filter(Boolean),
+      );
+
+      for (const preset of STORE_PRESETS) {
+        const presetHost = new URL(preset.url).hostname.toLowerCase();
+        if (existingHosts.has(presetHost)) continue;
+
+        const res = await fetch('/api/v1/admin/stores', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: preset.name,
+            url: preset.url,
+            scraper_type: 'web_scrape',
+            scraper_config: { platform: preset.platform, default_currency: 'CLP' },
+          }),
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          // Continue with next store; report at the end.
+          console.error('preset create failed', preset.name, json.error?.message);
+          continue;
+        }
+      }
+
+      await load();
+    } catch {
+      alert('Error de conexion');
+    } finally {
+      setCreatingPreset(false);
+    }
+  }
+
   // ---- Links panel ----
 
   const loadLinks = useCallback(async (storeId: string) => {
@@ -284,7 +510,34 @@ export default function AdminStoresPage() {
       const res = await fetch(`/api/v1/cards?q=${encodeURIComponent(q)}&limit=10`);
       const json = await res.json();
       if (json.ok) {
-        setLinkSearchResults(json.data.items ?? []);
+        const baseItems = (json.data.items ?? []) as CardSearchResult[];
+        const byCard = new Map<string, CardSearchResult>();
+        for (const item of baseItems) {
+          if (!byCard.has(item.card.card_id)) byCard.set(item.card.card_id, item);
+        }
+
+        const allPrintings = await Promise.all(
+          [...byCard.values()].map(async (item) => {
+            try {
+              const rp = await fetch(`/api/v1/cards/${item.card.card_id}/printings`);
+              const jp = await rp.json();
+              if (!jp.ok) return [];
+              const rows = (jp.data ?? []) as PrintingOption[];
+              return rows.map((p) => ({
+                card_printing_id: p.card_printing_id,
+                image_url: p.image_url ?? item.image_url,
+                card: { card_id: item.card.card_id, name: item.card.name },
+                edition: { name: p.edition?.name ?? item.edition.name, code: p.edition?.code ?? item.edition.code },
+                rarity_tier: p.rarity_tier ? { name: p.rarity_tier.name } : item.rarity_tier,
+              })) as CardSearchResult[];
+            } catch {
+              return [item];
+            }
+          }),
+        );
+
+        const flattened = allPrintings.flat();
+        setLinkSearchResults(flattened.length > 0 ? flattened : baseItems);
       }
     } catch {
       // silent
@@ -296,23 +549,82 @@ export default function AdminStoresPage() {
   function openAddLink() {
     setLinkSearch('');
     setLinkSearchResults([]);
-    setSelectedPrinting(null);
+    setSelectedCard(null);
+    setCardPrintings([]);
+    setSelectedPrintingId(null);
+    setCreateReprint(false);
     setLinkProductUrl('');
     setLinkProductName('');
     setAddLinkOpen(true);
   }
 
+  async function loadPrintings(cardId: string) {
+    setCardPrintingsLoading(true);
+    try {
+      const res = await fetch(`/api/v1/cards/${cardId}/printings`);
+      const json = await res.json();
+      if (json.ok) {
+        const list = (json.data as PrintingOption[]) ?? [];
+        setCardPrintings(list);
+        if (list.length > 0) setSelectedPrintingId(list[0]!.card_printing_id);
+      }
+    } catch {
+      // silent
+    } finally {
+      setCardPrintingsLoading(false);
+    }
+  }
+
   async function handleAddLink() {
-    if (!selectedStore || !selectedPrinting || !linkProductUrl.trim()) return;
+    if (!selectedStore || !selectedCard || !selectedPrintingId || !linkProductUrl.trim()) return;
     setAddingLink(true);
     try {
+      let printingId = selectedPrintingId;
+      const productName = linkProductName.trim();
+      const shouldCreateReprint = createReprint
+        || (productName.length > 0 && normalizeName(productName) !== normalizeName(selectedCard.card.name));
+
+      if (shouldCreateReprint) {
+        const base = cardPrintings.find((p) => p.card_printing_id === selectedPrintingId) ?? cardPrintings[0];
+        if (!base) throw new Error('No hay impresion base para clonar');
+
+        const variant = (productName || 'reprint').slice(0, 50);
+        const existingReprint = cardPrintings.find((p) => normalizeName(p.printing_variant ?? '') === normalizeName(variant));
+
+        if (existingReprint) {
+          printingId = existingReprint.card_printing_id;
+        } else {
+          const resPrinting = await fetch(`/api/v1/cards/${base.card_id}/printings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              edition_id: base.edition_id,
+              rarity_tier_id: base.rarity_tier_id ?? undefined,
+              // Never persist external scrape URLs directly in DB.
+              // If there is no managed image yet, it will be uploaded via scraped_image_url later.
+              image_url: isManagedCardImageUrl(base.image_url) ? base.image_url : undefined,
+              illustrator: base.illustrator ?? undefined,
+              collector_number: base.collector_number ?? undefined,
+              legal_status: base.legal_status ?? 'LEGAL',
+              printing_variant: variant,
+            }),
+          });
+          const jsonPrint = await resPrinting.json();
+          if (!jsonPrint.ok) {
+            throw new Error(jsonPrint.error?.message ?? 'No se pudo crear reimpresion');
+          }
+          printingId = jsonPrint.data.card_printing_id as string;
+        }
+      }
+
       const res = await fetch(`/api/v1/admin/stores/${selectedStore.store_id}/links`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          card_printing_id: selectedPrinting.card_printing_id,
+          card_printing_id: printingId,
           product_url: linkProductUrl.trim(),
-          product_name: linkProductName.trim() || null,
+          product_name: productName || null,
+          scraped_image_url: quickResult?.image_url ?? null,
         }),
       });
       const json = await res.json();
@@ -320,10 +632,26 @@ export default function AdminStoresPage() {
         alert(json.error?.message ?? 'Error al agregar link');
         return;
       }
+
+      // Trigger immediate scrape for this printing so price appears right away
+      const scrapeRes = await fetch(`/api/v1/admin/stores/${selectedStore.store_id}/scrape`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ scope: 'single', card_printing_id: printingId }),
+      });
+      const scrapeJson = await scrapeRes.json().catch(() => null);
+      if (scrapeJson?.ok) {
+        const exec = scrapeJson.data?.execution;
+        if (exec) {
+          setScrapeResult(`Precio actualizado al instante: ${exec.success}/${exec.total} exitosos`);
+        }
+      }
+
       setAddLinkOpen(false);
-      loadLinks(selectedStore.store_id);
-    } catch {
-      alert('Error de conexión');
+      setCreateReprint(false);
+      await loadLinks(selectedStore.store_id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error de conexion');
     } finally {
       setAddingLink(false);
     }
@@ -455,6 +783,100 @@ export default function AdminStoresPage() {
 
       <Separator />
 
+      
+
+      {/* Quick scrape playground */}
+      <div className="rounded-lg border border-border/60 bg-card/70 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Wand2 className="h-4 w-4 text-accent" />
+            <div>
+              <p className="text-sm font-semibold">Scrape rápido</p>
+              <p className="text-xs text-muted-foreground">Prueba una URL, ve los datos y luego vincúlala a una carta.</p>
+            </div>
+          </div>
+          <Button size="sm" onClick={handleQuickScrape} disabled={quickLoading || !quickUrl.trim()}>
+            {quickLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
+            Scrape
+          </Button>
+        </div>
+        <div className="flex flex-col gap-3 md:flex-row">
+          <Input
+            value={quickUrl}
+            onChange={(e) => setQuickUrl(e.target.value)}
+            placeholder="https://tienda.cl/producto..."
+            className="flex-1"
+          />
+        </div>
+        {quickError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {quickError}
+          </div>
+        )}
+        {quickResult && (
+          <div className="rounded-md border border-border/60 bg-muted/20 p-3">
+            <div className="flex items-start gap-3">
+              <div className="h-20 w-16 flex-shrink-0 overflow-hidden rounded border border-border bg-background">
+                {quickResult.image_url ? (
+                  <img src={quickResult.image_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                    <ImageIcon className="h-6 w-6" />
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-sm font-semibold truncate">{quickResult.name ?? 'Sin título'}</p>
+                <p className="text-xs text-muted-foreground">
+                  Precio: {quickResult.price !== null ? formatCLP(quickResult.price) : 'No detectado'} ·
+                  Moneda: {quickResult.currency} · {quickResult.available ? 'Disponible' : 'Sin stock'}
+                </p>
+                {quickResult.platform && (
+                  <p className="text-[11px] text-muted-foreground">Plataforma: {quickResult.platform}</p>
+                )}
+                {quickResult.store_name && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Tienda detectada: {quickResult.store_name}
+                  </p>
+                )}
+                {quickResult.original_price && (
+                  <p className="text-xs text-muted-foreground">Precio lista: {formatCLP(quickResult.original_price)}</p>
+                )}
+                {quickResult.stock !== null && (
+                  <p className="text-xs text-muted-foreground">Stock: {quickResult.stock}</p>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setLinkProductUrl(quickUrl.trim());
+                    setLinkProductName(quickResult.name ?? '');
+                    if (!selectedStore) {
+                      alert('Selecciona una tienda en la lista para vincular.');
+                      return;
+                    }
+                    setAddLinkOpen(true);
+                  }}
+                >
+                  Vincular a carta
+                </Button>
+                {!selectedStore && suggestedStore && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleCreateSuggestedStore()}
+                    disabled={creatingSuggested}
+                  >
+                    {creatingSuggested ? 'Creando...' : `Crear tienda (${suggestedStore.name})`}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {scrapeResult && (
         <div className="rounded-lg border border-border bg-muted/50 p-3 text-sm">
           {scrapeResult}
@@ -563,99 +985,149 @@ export default function AdminStoresPage() {
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-lg">
-                    <DialogHeader>
-                      <DialogTitle>Vincular Producto</DialogTitle>
-                      <DialogDescription>
-                        Busca una carta y vincula su URL del producto en {selectedStore.name}.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      {/* Card search */}
-                      <div className="space-y-2">
-                        <Label>Buscar carta</Label>
-                        <div className="relative">
-                          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            value={linkSearch}
-                            onChange={(e) => {
-                              setLinkSearch(e.target.value);
-                              searchCards(e.target.value);
-                            }}
-                            placeholder="Nombre de la carta..."
-                            className="pl-9"
-                          />
-                        </div>
-                        {linkSearching && <p className="text-xs text-muted-foreground">Buscando...</p>}
-                        {linkSearchResults.length > 0 && !selectedPrinting && (
-                          <div className="max-h-48 overflow-y-auto rounded-md border border-border">
-                            {linkSearchResults.map((item) => (
-                              <button
-                                key={item.card_printing_id}
-                                type="button"
-                                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 transition-colors"
-                                onClick={() => {
-                                  setSelectedPrinting(item);
-                                  setLinkProductName(item.card.name);
-                                }}
-                              >
-                                {item.image_url && (
-                                  <img src={item.image_url} alt="" className="h-10 w-7 rounded object-cover" />
-                                )}
-                                <div>
-                                  <span className="text-sm font-medium">{item.card.name}</span>
-                                  <span className="ml-2 text-xs text-muted-foreground">
-                                    {item.edition.name}
-                                    {item.rarity_tier ? ` — ${item.rarity_tier.name}` : ''}
-                                  </span>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {selectedPrinting && (
-                          <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2">
-                            <Package className="h-4 w-4 text-primary" />
-                            <span className="text-sm font-medium">{selectedPrinting.card.name}</span>
-                            <span className="text-xs text-muted-foreground">{selectedPrinting.edition.name}</span>
-                            <button onClick={() => setSelectedPrinting(null)} className="ml-auto">
-                              <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
+  <DialogHeader>
+    <DialogTitle>Vincular Producto</DialogTitle>
+    <DialogDescription>
+      Busca una carta e impresion, y vincula su URL del producto en {selectedStore.name}.
+    </DialogDescription>
+  </DialogHeader>
+  <div className="space-y-4 py-4">
+    <div className="space-y-2">
+      <Label>Buscar carta</Label>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={linkSearch}
+          onChange={(e) => {
+            setLinkSearch(e.target.value);
+            void searchCards(e.target.value);
+          }}
+          placeholder="Nombre de la carta..."
+          className="pl-9"
+        />
+      </div>
+      {linkSearching ? <p className="text-xs text-muted-foreground">Buscando...</p> : null}
+      {linkSearchResults.length > 0 && !selectedCard ? (
+        <div className="max-h-48 overflow-y-auto rounded-md border border-border">
+          {linkSearchResults.map((item) => (
+            <button
+              key={item.card_printing_id}
+              type="button"
+              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 transition-colors"
+              onClick={() => {
+                setSelectedCard(item);
+                setLinkProductName(item.card.name);
+                void loadPrintings(item.card.card_id);
+              }}
+            >
+              {item.image_url ? (
+                <img src={item.image_url} alt="" className="h-10 w-7 rounded object-cover" />
+              ) : null}
+              <div>
+                <span className="text-sm font-medium">{item.card.name}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {item.edition.name}
+                  {item.rarity_tier ? ` - ${item.rarity_tier.name}` : ''}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {selectedCard ? (
+        <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2">
+          <Package className="h-4 w-4 text-primary" />
+          <span className="text-sm font-medium">{selectedCard.card.name}</span>
+          <span className="text-xs text-muted-foreground">{selectedCard.edition.name}</span>
+          <button
+            onClick={() => {
+              setSelectedCard(null);
+              setCardPrintings([]);
+              setSelectedPrintingId(null);
+              setCreateReprint(false);
+            }}
+            className="ml-auto"
+          >
+            <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+          </button>
+        </div>
+      ) : null}
+    </div>
 
-                      {/* Product URL */}
-                      <div className="space-y-2">
-                        <Label htmlFor="link-url">URL del producto *</Label>
-                        <Input
-                          id="link-url"
-                          value={linkProductUrl}
-                          onChange={(e) => setLinkProductUrl(e.target.value)}
-                          placeholder="https://tienda.cl/producto/carta-xyz"
-                        />
-                      </div>
+    {selectedCard ? (
+      <div className="space-y-2">
+        <Label>Impresion</Label>
+        {cardPrintingsLoading ? (
+          <p className="text-xs text-muted-foreground">Cargando impresiones...</p>
+        ) : cardPrintings.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No hay impresiones disponibles.</p>
+        ) : (
+          <div className="max-h-44 space-y-2 overflow-y-auto rounded-md border border-border p-2">
+            {cardPrintings.map((p) => (
+              <label key={p.card_printing_id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="selected-printing"
+                  checked={selectedPrintingId === p.card_printing_id}
+                  onChange={() => setSelectedPrintingId(p.card_printing_id)}
+                />
+                <span className="font-medium">{p.edition?.name ?? 'Edicion'}</span>
+                {p.collector_number ? (
+                  <span className="text-xs text-muted-foreground">#{p.collector_number}</span>
+                ) : null}
+                {p.printing_variant ? (
+                  <span className="text-xs text-muted-foreground">- {p.printing_variant}</span>
+                ) : null}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    ) : null}
 
-                      {/* Product name */}
-                      <div className="space-y-2">
-                        <Label htmlFor="link-name">Nombre del producto (opcional)</Label>
-                        <Input
-                          id="link-name"
-                          value={linkProductName}
-                          onChange={(e) => setLinkProductName(e.target.value)}
-                          placeholder="Se auto-detectará al hacer scrape"
-                        />
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setAddLinkOpen(false)}>Cancelar</Button>
-                      <Button
-                        onClick={handleAddLink}
-                        disabled={addingLink || !selectedPrinting || !linkProductUrl.trim()}
-                      >
-                        {addingLink ? 'Agregando...' : 'Agregar'}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
+    <div className="space-y-2">
+      <Label htmlFor="link-url">URL del producto *</Label>
+      <Input
+        id="link-url"
+        value={linkProductUrl}
+        onChange={(e) => setLinkProductUrl(e.target.value)}
+        placeholder="https://tienda.cl/producto/carta-xyz"
+      />
+    </div>
+
+    <div className="space-y-2">
+      <Label htmlFor="link-name">Nombre del producto (opcional)</Label>
+      <Input
+        id="link-name"
+        value={linkProductName}
+        onChange={(e) => setLinkProductName(e.target.value)}
+        placeholder="Se auto-detectara al hacer scrape"
+      />
+      <div className="flex items-center gap-2">
+        <input
+          id="create-reprint"
+          type="checkbox"
+          checked={createReprint}
+          onChange={(e) => setCreateReprint(e.target.checked)}
+          disabled={!selectedPrintingId}
+          className="h-4 w-4 accent-primary"
+        />
+        <Label htmlFor="create-reprint" className="text-xs text-muted-foreground">
+          Crear reimpresion cuando el nombre del producto difiere
+        </Label>
+      </div>
+    </div>
+  </div>
+  <DialogFooter>
+    <Button variant="outline" onClick={() => setAddLinkOpen(false)}>Cancelar</Button>
+    <Button
+      onClick={handleAddLink}
+      disabled={addingLink || !selectedPrintingId || !linkProductUrl.trim()}
+    >
+      {addingLink ? 'Agregando...' : 'Agregar'}
+    </Button>
+  </DialogFooter>
+</DialogContent>
                 </Dialog>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedStore(null)} title="Cerrar">
                   <X className="h-4 w-4" />
@@ -740,3 +1212,7 @@ export default function AdminStoresPage() {
     </div>
   );
 }
+
+
+
+

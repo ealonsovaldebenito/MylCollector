@@ -12,6 +12,7 @@ import { withApiHandler } from '@/lib/api/with-api-handler';
 import { createSuccess, createError } from '@/lib/api/response';
 import { AppError } from '@/lib/api/errors';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { triggerScrape, executeScrapeJob, getScrapeJobs } from '@/lib/services/scraping.service';
 import { triggerScrapeSchema } from '@myl/shared';
 
@@ -20,6 +21,17 @@ export const POST = withApiHandler(async (request, { params, requestId }) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return createError('NOT_AUTHENTICATED', 'Autenticación requerida', requestId);
 
+  // Require admin role
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
+    .from('user_profiles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  if (!profile || profile.role !== 'admin') {
+    return createError('FORBIDDEN', 'Solo administradores pueden lanzar scrapes', requestId);
+  }
+
   const body = await request.json();
   const parsed = triggerScrapeSchema.safeParse(body);
   if (!parsed.success) {
@@ -27,10 +39,10 @@ export const POST = withApiHandler(async (request, { params, requestId }) => {
   }
 
   // 1. Create the scrape job
-  const triggerResult = await triggerScrape(supabase, params.storeId!, parsed.data);
+  const triggerResult = await triggerScrape(adminClient, params.storeId!, parsed.data);
 
   // 2. Execute the scrape job (fetch pages + extract prices)
-  const execResult = await executeScrapeJob(supabase, triggerResult.job.scrape_job_id);
+  const execResult = await executeScrapeJob(adminClient, triggerResult.job.scrape_job_id);
 
   return createSuccess({
     job: triggerResult.job,
@@ -43,6 +55,16 @@ export const GET = withApiHandler(async (_request, { params, requestId }) => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return createError('NOT_AUTHENTICATED', 'Autenticación requerida', requestId);
 
-  const jobs = await getScrapeJobs(supabase, params.storeId!);
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
+    .from('user_profiles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  if (!profile || profile.role !== 'admin') {
+    return createError('FORBIDDEN', 'Solo administradores pueden ver scrapes', requestId);
+  }
+
+  const jobs = await getScrapeJobs(adminClient, params.storeId!);
   return createSuccess({ items: jobs });
 });

@@ -14,6 +14,11 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStorePrintingLinks, createStorePrintingLink } from '@/lib/services/stores.service';
 import { createStorePrintingLinkSchema } from '@myl/shared';
+import { z } from 'zod';
+
+const createStorePrintingLinkAdminSchema = createStorePrintingLinkSchema.extend({
+  scraped_image_url: z.string().url().optional().nullable(),
+});
 
 export const GET = withApiHandler(async (request, { params, requestId }) => {
   const supabase = await createClient();
@@ -54,11 +59,21 @@ export const POST = withApiHandler(async (request, { params, requestId }) => {
   }
 
   const body = await request.json();
-  const parsed = createStorePrintingLinkSchema.safeParse(body);
+  const parsed = createStorePrintingLinkAdminSchema.safeParse(body);
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Datos inválidos', { issues: parsed.error.issues });
   }
 
-  const link = await createStorePrintingLink(adminClient, params.storeId!, parsed.data);
+  const link = await createStorePrintingLink(
+    adminClient,
+    params.storeId!,
+    {
+      card_printing_id: parsed.data.card_printing_id,
+      product_url: parsed.data.product_url,
+      product_name: parsed.data.product_name ?? null,
+    },
+    { scraped_image_url: parsed.data.scraped_image_url ?? null },
+  );
   return createSuccess(link);
 });
+

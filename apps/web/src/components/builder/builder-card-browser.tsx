@@ -1,3 +1,15 @@
+/**
+ * File: apps/web/src/components/builder/builder-card-browser.tsx
+ *
+ * BuilderCardBrowser — Buscador/selector de cartas para el builder.
+ * Permite filtros por tipo/raza/era/edición y bloquea el botón + cuando
+ * el mazo no puede aceptar más copias según reglas activas.
+ *
+ * Changelog:
+ * - 2026-02-18 — Muestra badges de Banlist/Limitadas por formato dentro de cada carta.
+ * - 2026-02-18 — Soporte para deshabilitar + por límites de copias/tamaño.
+ */
+
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -16,6 +28,12 @@ import { Loader2, Plus, Search } from 'lucide-react';
 interface BuilderCardBrowserProps {
   onAddCard: (card: CardPrintingData) => void;
   deckCardIds: Set<string>;
+  canAddCard?: (card: CardPrintingData) => boolean;
+  getCardCopyLimit?: (
+    cardId: string,
+    options: { is_unique: boolean; legal_status: CardPrintingData['legal_status'] },
+  ) => number;
+  getFormatLimitOverride?: (cardId: string) => number | undefined;
   preset?: {
     block_id?: string | null;
     edition_id?: string | null;
@@ -28,7 +46,14 @@ interface BuilderCardBrowserProps {
   };
 }
 
-export function BuilderCardBrowser({ onAddCard, deckCardIds, preset }: BuilderCardBrowserProps) {
+export function BuilderCardBrowser({
+  onAddCard,
+  deckCardIds,
+  canAddCard,
+  getCardCopyLimit,
+  getFormatLimitOverride,
+  preset,
+}: BuilderCardBrowserProps) {
   const [search, setSearch] = useState('');
   const [cardTypeFilter, setCardTypeFilter] = useState('');
   const [raceFilter, setRaceFilter] = useState('');
@@ -216,6 +241,20 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds, preset }: BuilderCa
                     text: item.card.text,
                   },
                 };
+                const isAddDisabled = canAddCard ? !canAddCard(printing) : false;
+                const maxCopiesForCard = getCardCopyLimit
+                  ? getCardCopyLimit(item.card.card_id, {
+                      is_unique: item.card.is_unique,
+                      legal_status: item.legal_status as CardPrintingData['legal_status'],
+                    })
+                  : item.card.is_unique
+                    ? 1
+                    : 3;
+                const overrideLimit = getFormatLimitOverride?.(item.card.card_id);
+                const isFormatBanned = maxCopiesForCard <= 0 || overrideLimit === 0;
+                const isRestricted =
+                  !isFormatBanned &&
+                  (item.legal_status === 'RESTRICTED' || (overrideLimit !== undefined && maxCopiesForCard <= 2));
 
                 return (
                   <div
@@ -237,6 +276,15 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds, preset }: BuilderCa
                         {item.card.cost !== null ? (
                           <span className="text-[10px] text-muted-foreground">· C:{item.card.cost}</span>
                         ) : null}
+                        {isFormatBanned ? (
+                          <Badge variant="destructive" className="h-3.5 px-1 text-[9px]">
+                            Banlist
+                          </Badge>
+                        ) : isRestricted ? (
+                          <Badge variant="outline" className="h-3.5 px-1 text-[9px]">
+                            Lim {maxCopiesForCard}
+                          </Badge>
+                        ) : null}
                         <Badge variant="outline" className="h-3.5 px-1 text-[9px]">
                           {editionDisplayName(item.edition.name)}
                         </Badge>
@@ -249,6 +297,8 @@ export function BuilderCardBrowser({ onAddCard, deckCardIds, preset }: BuilderCa
                       size="icon"
                       className="h-6 w-6 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                       onClick={() => onAddCard(printing)}
+                      disabled={isAddDisabled}
+                      title={isAddDisabled ? 'No puedes agregar mas copias de esta carta' : 'Agregar'}
                     >
                       <Plus className="h-3.5 w-3.5" />
                     </Button>

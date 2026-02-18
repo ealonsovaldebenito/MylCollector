@@ -13,6 +13,8 @@
  * - Agregación de payloads (tags sugeridas) por `card_id` para evitar depender de `qty` en el slot.
  *
  * Changelog:
+ * - 2026-02-18 — Raza ahora se restringe por edición seleccionada (no lista global).
+ * - 2026-02-18 — Usa deck_size dinámico del formato + bloqueo preventivo de add por límites.
  * - 2026-02-17: Persistencia (auto-nav /builder/:deckId).
  * - 2026-02-17 — Refactor: compatibilidad con cartas por copia + duplicación por `deck_card_id`.
  */
@@ -20,6 +22,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useDeckBuilder } from '@/hooks/use-deck-builder';
 import { useFormats } from '@/hooks/use-formats';
@@ -40,7 +43,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Save, X, Loader2, AlertCircle, SlidersHorizontal } from 'lucide-react';
+import { Save, X, Loader2, AlertCircle, SlidersHorizontal, Eye } from 'lucide-react';
 
 interface BuilderWorkspaceProps {
   initialDeckId?: string;
@@ -103,6 +106,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
   // Find selected edition and race names
   const selectedEdition = editions.find((e) => e.edition_id === builder.editionId);
   const selectedRace = races.find((r) => r.race_id === builder.raceId);
+  const viewDeckId = builder.deckId ?? initialDeckId;
 
   const editionsForBlock = useMemo(() => {
     if (!blockId) return [];
@@ -138,8 +142,9 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
   }, [isEditionRacialFormat, builder.editionId, editions]);
 
   React.useEffect(() => {
-    if (!isEditionRacialFormat || !builder.editionId) {
+    if (!builder.editionId) {
       setAvailableRaceIds(null);
+      setIsLoadingAvailableRaces(false);
       return;
     }
 
@@ -167,7 +172,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [isEditionRacialFormat, builder.editionId]);
+  }, [builder.editionId]);
 
   // Load deck if provided
   React.useEffect(() => {
@@ -182,8 +187,8 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
     [builder.cards],
   );
 
-  const hasStartingGold = builder.cards.some((c) => c.is_starting_gold);
-  const deckSize = 50; // TODO: Extract from format params
+  const deckSize = builder.deckSize;
+  const playableDeckSize = Math.max(deckSize - 1, 0);
   const shouldShowValidation =
     builder.isValidating ||
     (builder.validation?.messages?.length ?? 0) > 0 ||
@@ -414,6 +419,19 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
             <SlidersHorizontal className="h-3.5 w-3.5" />
             Detalles
           </Button>
+          {viewDeckId ? (
+            <Button asChild type="button" size="sm" variant="outline" className="gap-1.5">
+              <Link href={`/builder/${viewDeckId}/view`}>
+                <Eye className="h-3.5 w-3.5" />
+                Vista
+              </Link>
+            </Button>
+          ) : (
+            <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled>
+              <Eye className="h-3.5 w-3.5" />
+              Vista
+            </Button>
+          )}
           <ExportDeckDialog
             versionId={builder.versionId}
             deckName={builder.name || 'Mazo sin nombre'}
@@ -475,6 +493,9 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
             <BuilderCardBrowser
               onAddCard={builder.addCard}
               deckCardIds={deckCardIds}
+              canAddCard={builder.canAddPrinting}
+              getCardCopyLimit={builder.getCardCopyLimit}
+              getFormatLimitOverride={builder.getFormatLimitOverride}
               preset={
                 isEditionRacialFormat
                   ? {
@@ -497,12 +518,11 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
             <BuilderDeckEditor
               groupedByType={builder.groupedByType}
               totalCards={builder.totalCards}
-              deckSize={deckSize}
-              hasStartingGold={hasStartingGold}
+              deckSize={playableDeckSize}
               isValid={builder.validation?.is_valid ?? null}
+              getCardCopyLimit={builder.getCardCopyLimit}
               onAddCard={handleDuplicateCopy}
               onRemoveCard={builder.removeCard}
-              onSetStartingGold={builder.setStartingGold}
               onToggleKeyCard={builder.toggleKeyCard}
               onReplacePrinting={builder.replacePrinting}
             />
@@ -552,7 +572,7 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
                 Catalogo
               </TabsTrigger>
               <TabsTrigger value="deck" className="flex-1">
-                Mazo ({builder.totalCards}/{deckSize})
+                Mazo ({builder.totalCards}/{playableDeckSize})
               </TabsTrigger>
               <TabsTrigger value="stats" className="flex-1">
                 Panel
@@ -562,6 +582,9 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
               <BuilderCardBrowser
                 onAddCard={builder.addCard}
                 deckCardIds={deckCardIds}
+                canAddCard={builder.canAddPrinting}
+                getCardCopyLimit={builder.getCardCopyLimit}
+                getFormatLimitOverride={builder.getFormatLimitOverride}
                 preset={
                   isEditionRacialFormat
                     ? {
@@ -582,12 +605,11 @@ export function BuilderWorkspace({ initialDeckId, initialFormatId }: BuilderWork
               <BuilderDeckEditor
                 groupedByType={builder.groupedByType}
                 totalCards={builder.totalCards}
-                deckSize={deckSize}
-                hasStartingGold={hasStartingGold}
+                deckSize={playableDeckSize}
                 isValid={builder.validation?.is_valid ?? null}
+                getCardCopyLimit={builder.getCardCopyLimit}
                 onAddCard={handleDuplicateCopy}
                 onRemoveCard={builder.removeCard}
-                onSetStartingGold={builder.setStartingGold}
                 onToggleKeyCard={builder.toggleKeyCard}
                 onReplacePrinting={builder.replacePrinting}
               />

@@ -14,6 +14,7 @@ import type { TriggerScrape } from '@myl/shared';
 
 import { AppError } from '../api/errors';
 import { fetchAndScrape, type ScraperConfig, type ScraperPlatform } from './scraper-engines';
+import { isManagedCardImageUrl, uploadCardImageFromUrl } from './storage.service';
 
 type Client = SupabaseClient<Database>;
 
@@ -396,6 +397,32 @@ export async function executeScrapeJob(
           product_name: result.name ?? link.product_url,
         } as never)
         .eq('store_printing_link_id', link.store_printing_link_id);
+
+      // If the printing has no image yet and scraping returned one, upload it to Storage
+      if (result.image_url) {
+        const { data: printing } = await supabase
+          .from('card_printings')
+          .select('image_url')
+          .eq('card_printing_id', link.card_printing_id)
+          .single();
+
+        const currentImage = printing?.image_url?.trim() ?? '';
+        const shouldUpload = currentImage === '' || !isManagedCardImageUrl(currentImage);
+        if (shouldUpload) {
+          const uploaded = await uploadCardImageFromUrl(
+            supabase,
+            result.image_url,
+            link.card_printing_id,
+            { base_url: link.product_url },
+          );
+          if (uploaded) {
+            await supabase
+              .from('card_printings')
+              .update({ image_url: uploaded } as never)
+              .eq('card_printing_id', link.card_printing_id);
+          }
+        }
+      }
 
       success++;
 

@@ -9,6 +9,7 @@
  *   - store_printing_links → card_printings, stores (FK)
  *
  * Changelog:
+ *   2026-02-18 — Fix: evita loop de render en modo create por arrays default inestables + Select seguro.
  *   2026-02-16 — Creación inicial con tabs y preview sidebar
  *   2026-02-17 — Fix: eliminar mensajes técnicos visibles en tab Tiendas
  *   2026-02-17 — UX: mejorar estados vacíos con iconos y mensajes claros
@@ -100,6 +101,10 @@ interface CardFormProps {
 }
 
 const ALIADO_CODE = 'ALIADO';
+const EMPTY_PRINTINGS: CardDetail['printings'] = [];
+const EMPTY_BLOCKS: Block[] = [];
+const EMPTY_EDITIONS: Edition[] = [];
+const EMPTY_RARITIES: RarityTier[] = [];
 
 function formatCLP(value: number): string {
   return new Intl.NumberFormat('es-CL', {
@@ -122,10 +127,10 @@ export function CardForm({
   races,
   tags,
   mode,
-  printings = [],
-  blocks = [],
-  editions = [],
-  rarities = [],
+  printings = EMPTY_PRINTINGS,
+  blocks = EMPTY_BLOCKS,
+  editions = EMPTY_EDITIONS,
+  rarities = EMPTY_RARITIES,
 }: CardFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -494,11 +499,15 @@ export function CardForm({
               <Label className="text-sm font-medium flex items-center gap-1">
                 Tipo <span className="text-destructive">*</span>
               </Label>
-              <Select value={form.card_type_id} onValueChange={(v) => update('card_type_id', v)}>
+              <Select
+                value={form.card_type_id || '__none__'}
+                onValueChange={(v) => update('card_type_id', v === '__none__' ? '' : v)}
+              >
                 <SelectTrigger className="h-11">
                   <SelectValue placeholder="Seleccionar tipo" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="__none__">Seleccionar tipo</SelectItem>
                   {cardTypes.map((ct) => (
                     <SelectItem key={ct.card_type_id} value={ct.card_type_id}>
                       {ct.name}
@@ -511,11 +520,15 @@ export function CardForm({
             {isAlly && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Raza</Label>
-                <Select value={form.race_id ?? ''} onValueChange={(v) => update('race_id', v || undefined)}>
+                <Select
+                  value={form.race_id ?? '__none__'}
+                  onValueChange={(v) => update('race_id', v === '__none__' ? undefined : v)}
+                >
                   <SelectTrigger className="h-11">
                     <SelectValue placeholder="Seleccionar raza" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">Sin raza</SelectItem>
                     {races.map((r) => (
                       <SelectItem key={r.race_id} value={r.race_id}>
                         {r.name}

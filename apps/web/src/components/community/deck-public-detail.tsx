@@ -15,7 +15,6 @@ import {
   ArrowLeft,
   Heart,
   Eye,
-  MessageCircle,
   Calendar,
   User as UserIcon,
   Shield,
@@ -286,6 +285,12 @@ export function DeckPublicDetail({ deckId }: { deckId: string }) {
                 <Button variant="outline" size="sm" className="gap-2" onClick={handleShare}>
                   <Link2 className="h-4 w-4" />
                   Compartir
+                </Button>
+                <Button asChild variant="outline" size="sm" className="gap-2">
+                  <Link href={`/community/decks/${deckId}/view`}>
+                    <Eye className="h-4 w-4" />
+                    Vista
+                  </Link>
                 </Button>
               </div>
             </div>

@@ -132,7 +132,7 @@ export async function getPublicDeckDetail(
       const cardIds = [...new Set((printings ?? []).map((p) => p.card_id))];
       const { data: cardData } = await supabase
         .from('cards')
-        .select('card_id, name, card_type_id, cost, ally_strength, race_id')
+        .select('card_id, name, card_type_id, cost, ally_strength, race_id, card_type:card_types(name, code)')
         .in('card_id', cardIds);
 
       const cardMap = new Map((cardData ?? []).map((c) => [c.card_id, c]));

@@ -115,6 +115,15 @@ function parseAvailability(value: string | null | undefined): boolean {
   return lower.includes('instock') || lower.includes('in_stock') || lower === 'true';
 }
 
+function absolutizeUrl(value: string | null, baseUrl: string): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch {
+    return value;
+  }
+}
+
 // ============================================================================
 // WooCommerce scraper (ArkanoGames, etc.)
 // Extracts from JSON-LD Product > offers, with OG meta fallback
@@ -339,6 +348,7 @@ export async function fetchAndScrape(url: string, config: ScraperConfig): Promis
 
   const html = await response.text();
   const result = scrapeProductPage(html, config);
+  result.image_url = absolutizeUrl(result.image_url, response.url || url);
 
   // Enrich raw_data with fetch metadata
   result.raw_data.fetched_url = url;

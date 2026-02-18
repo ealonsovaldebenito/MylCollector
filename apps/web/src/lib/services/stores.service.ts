@@ -13,6 +13,7 @@ import type { Database } from '@myl/db';
 import type { CreateStore, UpdateStore, CreateStorePrintingLink } from '@myl/shared';
 
 import { AppError } from '../api/errors';
+import { isManagedCardImageUrl, uploadCardImageFromUrl } from './storage.service';
 
 type Client = SupabaseClient<Database>;
 
@@ -147,7 +148,37 @@ export async function createStorePrintingLink(
   supabase: Client,
   storeId: string,
   data: CreateStorePrintingLink,
+  options?: { scraped_image_url?: string | null },
 ) {
+  async function fillMissingPrintingImage() {
+    const scraped = options?.scraped_image_url?.trim();
+    if (!scraped) return;
+
+    const { data: printing } = await supabase
+      .from('card_printings')
+      .select('image_url')
+      .eq('card_printing_id', data.card_printing_id)
+      .single();
+
+    const currentImage = printing?.image_url?.trim() ?? '';
+    const shouldUpload =
+      currentImage === '' || !isManagedCardImageUrl(currentImage);
+    if (!shouldUpload) return;
+
+    const uploaded = await uploadCardImageFromUrl(
+      supabase,
+      scraped,
+      data.card_printing_id,
+      { base_url: data.product_url },
+    );
+    if (!uploaded) return;
+
+    await supabase
+      .from('card_printings')
+      .update({ image_url: uploaded } as never)
+      .eq('card_printing_id', data.card_printing_id);
+  }
+
   const { data: link, error } = await supabase
     .from('store_printing_links')
     .insert({
@@ -161,13 +192,46 @@ export async function createStorePrintingLink(
 
   if (error) {
     if (error.code === '23505') {
-      throw new AppError('VALIDATION_ERROR', 'Este printing ya está vinculado a esta tienda');
+      const { data: existing } = await supabase
+        .from('store_printing_links')
+        .select('*')
+        .eq('store_id', storeId)
+        .eq('card_printing_id', data.card_printing_id)
+        .maybeSingle();
+
+      if (!existing) {
+        throw new AppError('VALIDATION_ERROR', 'Este printing ya esta vinculado a esta tienda');
+      }
+
+      const updatePayload: Record<string, unknown> = {};
+      if ((!existing.product_name || existing.product_name.trim() === '') && data.product_name) {
+        updatePayload.product_name = data.product_name;
+      }
+      if ((!existing.product_url || existing.product_url.trim() === '') && data.product_url) {
+        updatePayload.product_url = data.product_url;
+      }
+
+      let updated = existing;
+      if (Object.keys(updatePayload).length > 0) {
+        const { data: next, error: updateErr } = await supabase
+          .from('store_printing_links')
+          .update(updatePayload as never)
+          .eq('store_printing_link_id', existing.store_printing_link_id)
+          .select('*')
+          .single();
+        if (updateErr) throw new AppError('INTERNAL_ERROR', 'Error al completar link existente');
+        if (next) updated = next;
+      }
+
+      await fillMissingPrintingImage();
+      return updated;
     }
     throw new AppError('INTERNAL_ERROR', 'Error al crear link de tienda');
   }
+
+  await fillMissingPrintingImage();
   return link;
 }
-
 /** Delete a store-printing link. */
 export async function deleteStorePrintingLink(supabase: Client, linkId: string) {
   const { error } = await supabase
@@ -194,3 +258,4 @@ export async function getStoresForPrinting(supabase: Client, printingId: string)
   if (error) throw new AppError('INTERNAL_ERROR', 'Error al cargar tiendas para el printing');
   return data ?? [];
 }
+

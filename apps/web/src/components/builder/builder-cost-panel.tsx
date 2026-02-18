@@ -380,7 +380,6 @@ export function BuilderCostPanel({ cards }: BuilderCostPanelProps) {
                 </TableBody>
               </Table>
             </div>
-            <p className="mt-2 text-[11px] text-muted-foreground">Se muestran hasta 60 filas. Las cartas sin precio aparecen como "—".</p>
           </CardContent>
         </Card>
       </div>
