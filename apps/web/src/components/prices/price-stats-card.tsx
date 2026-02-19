@@ -9,6 +9,7 @@
  * - Hook: `apps/web/src/hooks/use-prices.ts` → `usePriceHistory`
  * Changelog:
  * - 2026-02-17: Gráfico por tienda (toggle show/hide) y funciona aunque no existan precios comunitarios aprobados.
+ * - 2026-02-18: Histórico con ejes X/Y claros, rango semana/mes/año y ticks Y referenciales (redondeados).
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -43,6 +44,34 @@ interface PriceStatsCardProps {
 }
 
 type HistoryPoint = { t: number; price: number; captured_at: string };
+type SeriesPoint = { t: number; price: number };
+
+function toDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatDayLabel(ts: number): string {
+  return new Date(ts).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+}
+
+function niceStep(range: number): number {
+  if (!Number.isFinite(range) || range <= 0) return 1;
+  const rough = range / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  const base = rough / pow;
+  const stepBase = base <= 1 ? 1 : base <= 2 ? 2 : base <= 5 ? 5 : 10;
+  return stepBase * pow;
+}
 
 const SERIES_COLORS = [
   '#10b981',
@@ -60,12 +89,27 @@ const SERIES_COLORS = [
 export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsCardProps) {
   const { history, isLoading: isHistoryLoading } = usePriceHistory(cardPrintingId);
   const [hiddenSources, setHiddenSources] = useState<Record<string, boolean>>({});
+  const [range, setRange] = useState<'week' | 'month' | 'year'>('month');
+
+  const rangeStart = useMemo(() => {
+    const floor = new Date(2026, 0, 1);
+    const now = new Date();
+    const days = range === 'week' ? 7 : range === 'year' ? 365 : 30;
+    const start = new Date(now);
+    start.setDate(start.getDate() - (days - 1));
+    return start < floor ? floor : start;
+  }, [range]);
+
+  const boundedHistory = useMemo(() => {
+    const floorTs = new Date(2026, 0, 1).getTime();
+    return (history ?? []).filter((h) => new Date(h.captured_at).getTime() >= floorTs);
+  }, [history]);
 
   const sources = useMemo(() => {
     const set = new Set<string>();
-    for (const h of history ?? []) set.add(h.source_name);
+    for (const h of boundedHistory) set.add(h.source_name);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [history]);
+  }, [boundedHistory]);
 
   const sourceColors = useMemo(() => {
     const map: Record<string, string> = {};
@@ -86,10 +130,10 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
   }, [sources]);
 
   const chart = useMemo(() => {
-    if (!history || history.length < 2) return null;
+    if (!boundedHistory || boundedHistory.length === 0) return null;
 
     const bySource = new Map<string, CardPriceHistory[]>();
-    for (const h of history) {
+    for (const h of boundedHistory) {
       const arr = bySource.get(h.source_name) ?? [];
       arr.push(h);
       bySource.set(h.source_name, arr);
@@ -98,17 +142,44 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
     const visible = sources.filter((s) => !hiddenSources[s]);
     if (visible.length === 0) return null;
 
+    const minDate = startOfDay(rangeStart);
+    const maxDate = startOfDay(new Date());
+    const dayCount = Math.max(1, Math.floor((maxDate.getTime() - minDate.getTime()) / 86400000) + 1);
+    const days: number[] = Array.from({ length: dayCount }, (_, i) => addDays(minDate, i).getTime());
+
     const series = visible.map((sourceName) => {
       const ordered = [...(bySource.get(sourceName) ?? [])].sort(
         (a, b) => new Date(a.captured_at).getTime() - new Date(b.captured_at).getTime(),
       );
-      const points: HistoryPoint[] = ordered.map((p) => ({
-        t: new Date(p.captured_at).getTime(),
-        price: p.price,
-        captured_at: p.captured_at,
-      }));
+      if (ordered.length === 0) return null;
+
+      const daily = new Map<string, CardPriceHistory>();
+      for (const row of ordered) {
+        const dayKey = toDayKey(new Date(row.captured_at));
+        const prev = daily.get(dayKey);
+        if (!prev || new Date(row.captured_at).getTime() > new Date(prev.captured_at).getTime()) {
+          daily.set(dayKey, row);
+        }
+      }
+
+      const startTs = minDate.getTime();
+      const seed = [...ordered].reverse().find((row) => new Date(row.captured_at).getTime() <= startTs) ?? ordered[0];
+      let lastKnown: number | null = seed?.price ?? null;
+
+      const points: SeriesPoint[] = days.map((dayTs) => {
+        const dayKey = toDayKey(new Date(dayTs));
+        const hit = daily.get(dayKey);
+        if (hit) lastKnown = hit.price;
+        return {
+          t: dayTs,
+          price: lastKnown ?? 0,
+        };
+      });
+
       return { sourceName, points };
-    });
+    }).filter((s): s is { sourceName: string; points: SeriesPoint[] } => s !== null);
+
+    if (series.length === 0) return null;
 
     const all = series.flatMap((s) => s.points);
     const tMin = Math.min(...all.map((p) => p.t));
@@ -118,17 +189,23 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
     const priceMin = Math.min(...all.map((p) => p.price));
     const priceMax = Math.max(...all.map((p) => p.price));
     const priceRange = priceMax - priceMin || 1;
+    const step = niceStep(priceRange);
+    const yMin = Math.floor(priceMin / step) * step;
+    const yMax = Math.ceil(priceMax / step) * step;
+    const yRange = yMax - yMin || 1;
 
-    const width = 560;
-    const height = 160;
-    const padding = 12;
+    const width = 700;
+    const height = 208;
+    const padding = { left: 8, right: 8, top: 12, bottom: 24 };
+    const plotW = width - padding.left - padding.right;
+    const plotH = height - padding.top - padding.bottom;
 
     const withPolylines = series.map((s) => {
       const color = sourceColors[s.sourceName] ?? '#94a3b8';
       const polyPoints = s.points
         .map((p) => {
-          const x = padding + ((p.t - tMin) / timeRange) * (width - padding * 2);
-          const y = height - padding - ((p.price - priceMin) / priceRange) * (height - padding * 2);
+          const x = padding.left + ((p.t - tMin) / timeRange) * plotW;
+          const y = height - padding.bottom - ((p.price - yMin) / yRange) * plotH;
           return `${x.toFixed(1)},${y.toFixed(1)}`;
         })
         .join(' ');
@@ -149,6 +226,16 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
       };
     });
 
+    const yValues = [];
+    for (let v = yMin; v <= yMax + step * 0.5; v += step) {
+      yValues.push(v);
+    }
+    const xTickCount = Math.min(7, Math.max(4, Math.round(dayCount / 7) + 1));
+    const xTickIndices = Array.from({ length: xTickCount }, (_, i) => {
+      if (xTickCount === 1) return 0;
+      return Math.round((i / (xTickCount - 1)) * (dayCount - 1));
+    });
+
     return {
       width,
       height,
@@ -156,6 +243,15 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
       tMax,
       priceMin,
       priceMax,
+      yMin,
+      yMax,
+      padding,
+      plotW,
+      plotH,
+      dayCount,
+      days,
+      yValues,
+      xTickIndices,
       series: withPolylines,
     };
   }, [history, hiddenSources, sourceColors, sources]);
@@ -184,24 +280,41 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
       </CardHeader>
 
       <CardContent className="space-y-4">
-        <div className="rounded-lg border p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Histórico (tiendas)</p>
-                <p className="text-sm font-semibold text-foreground">
-                  {chart ? formatCLP(chart.priceMax) : isHistoryLoading ? 'Cargando…' : 'Sin datos'}
-                </p>
+          <div className="rounded-lg border p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Activity className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Histórico (tiendas)</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {chart ? formatCLP(chart.priceMax) : isHistoryLoading ? 'Cargando…' : 'Sin datos'}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            {chart ? (
-              <div className="text-xs text-muted-foreground">
-                {formatCLP(chart.priceMin)} → {formatCLP(chart.priceMax)}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(['week', 'month', 'year'] as const).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setRange(opt)}
+                    className={[
+                      'rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-wide transition-colors',
+                      range === opt ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:bg-muted/30',
+                    ].join(' ')}
+                  >
+                    {opt === 'week' ? 'Semana' : opt === 'month' ? 'Mes' : 'Año'}
+                  </button>
+                ))}
+                <span className="text-[10px] text-muted-foreground">Desde 01/01/2026</span>
               </div>
-            ) : null}
-          </div>
+
+              {chart ? (
+                <div className="text-xs text-muted-foreground">
+                  {formatCLP(chart.priceMin)} → {formatCLP(chart.priceMax)}
+                </div>
+              ) : null}
+            </div>
 
           {sources.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -230,33 +343,84 @@ export function PriceStatsCard({ cardPrintingId, stats, isLoading }: PriceStatsC
           ) : null}
 
           {chart ? (
-            <div className="mt-3">
-              <svg
-                viewBox={`0 0 ${chart.width} ${chart.height}`}
-                className="h-40 w-full"
-                role="img"
-                aria-label="Histórico de precios por tienda"
-              >
-                {chart.series.map((s) => (
-                  <polyline
-                    key={s.sourceName}
-                    points={s.polyPoints}
-                    fill="none"
-                    stroke={s.color}
-                    strokeWidth="2"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    opacity={hiddenSources[s.sourceName] ? 0.15 : 1}
-                  />
-                ))}
-              </svg>
-              <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                  {new Date(chart.tMin).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                </span>
-                <span>
-                  {new Date(chart.tMax).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                </span>
+            <div className="mt-3 grid grid-cols-[72px_minmax(0,1fr)] gap-2">
+              <div className="relative h-52">
+                {chart.yValues.map((value) => {
+                  const y = chart.height - chart.padding.bottom - ((value - chart.yMin) / (chart.yMax - chart.yMin || 1)) * chart.plotH;
+                  return (
+                    <span
+                      key={`y-${value}`}
+                      className="absolute right-0 -translate-y-1/2 text-[11px] text-muted-foreground"
+                      style={{ top: `${y}px` }}
+                    >
+                      {formatCLP(Math.round(value))}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="relative h-52">
+                <svg
+                  viewBox={`0 0 ${chart.width} ${chart.height}`}
+                  className="h-52 w-full"
+                  role="img"
+                  aria-label="Histórico de precios por tienda"
+                >
+                  {chart.yValues.map((value, idx) => {
+                    const y = chart.height - chart.padding.bottom - ((value - chart.yMin) / (chart.yMax - chart.yMin || 1)) * chart.plotH;
+                    return (
+                      <g key={`y-${idx}`}>
+                        <line
+                          x1={chart.padding.left}
+                          y1={y}
+                          x2={chart.width - chart.padding.right}
+                          y2={y}
+                          stroke="currentColor"
+                          opacity="0.1"
+                        />
+                      </g>
+                    );
+                  })}
+
+                  {chart.xTickIndices.map((idx) => {
+                    const t = chart.days[idx] ?? chart.tMin;
+                    const x = chart.padding.left + ((t - chart.tMin) / (chart.tMax - chart.tMin || 1)) * chart.plotW;
+                    return (
+                      <g key={`x-${idx}`}>
+                        <line
+                          x1={x}
+                          y1={chart.padding.top}
+                          x2={x}
+                          y2={chart.height - chart.padding.bottom}
+                          stroke="currentColor"
+                          opacity="0.06"
+                        />
+                        <text
+                          x={x}
+                          y={chart.height - 6}
+                          textAnchor="middle"
+                          fontSize="11"
+                          fill="currentColor"
+                          opacity="0.6"
+                        >
+                          {formatDayLabel(t)}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {chart.series.map((s) => (
+                    <polyline
+                      key={s.sourceName}
+                      points={s.polyPoints}
+                      fill="none"
+                      stroke={s.color}
+                      strokeWidth="2"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      opacity={hiddenSources[s.sourceName] ? 0.15 : 1}
+                    />
+                  ))}
+                </svg>
               </div>
             </div>
           ) : isHistoryLoading ? (

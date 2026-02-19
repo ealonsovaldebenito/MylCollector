@@ -59,12 +59,8 @@ export function CardDetailLegality({ card }: CardDetailLegalityProps) {
       {/* Overview */}
       <div className="space-y-2">
         <h4 className="text-sm font-semibold">Estado Legal por Edición</h4>
-        <p className="text-xs text-muted-foreground">
-          El estado legal puede variar según la edición de la carta.
-        </p>
-      </div>
 
-      <Separator />
+      </div>
 
       {/* Status groups */}
       <div className="space-y-4">

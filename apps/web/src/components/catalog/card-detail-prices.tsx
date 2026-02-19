@@ -191,10 +191,10 @@ export function CardDetailPrices({
   return (
     <div className="space-y-6">
       {/* Comparison board */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="rounded-lg border border-border bg-card p-3 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-lg font-semibold">Comparativa por impresión</h3>
+            <h3 className="text-base font-semibold">Comparativa por impresión</h3>
             <p className="text-xs text-muted-foreground">
               Compara rápidamente los precios entre reimpresiones. Haz click para seleccionar.
             </p>
@@ -204,11 +204,12 @@ export function CardDetailPrices({
           </Badge>
         </div>
 
-        <div className="grid gap-2">
+        <div className="grid gap-1.5">
           {printings.map((p) => {
             const active = p.card_printing_id === effectiveSelectedId;
             const agg = storeAggByPrintingId[p.card_printing_id] ?? null;
             const main = agg?.avg ?? agg?.min ?? null;
+            const variantLabel = p.printing_variant?.trim() || 'standard';
 
             return (
               <button
@@ -219,7 +220,7 @@ export function CardDetailPrices({
                   else setLocalSelectedId(p.card_printing_id);
                 }}
                 className={[
-                  'flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-left transition-colors',
+                  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border px-3 py-1.5 text-left transition-colors',
                   active ? 'border-accent/40 bg-accent/5' : 'border-border hover:bg-muted/30',
                 ].join(' ')}
               >
@@ -228,6 +229,9 @@ export function CardDetailPrices({
                     <span className="truncate text-sm font-medium">
                       {editionDisplayName(p.edition.name)}
                     </span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {variantLabel}
+                    </Badge>
                     {p.collector_number ? (
                       <span className="text-xs text-muted-foreground font-mono">#{p.collector_number}</span>
                     ) : null}
@@ -273,35 +277,6 @@ export function CardDetailPrices({
       </div>
 
       {/* Selector */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4">
-        <div className="min-w-0">
-          <h3 className="text-lg font-semibold">Precios por impresión</h3>
-          <p className="text-xs text-muted-foreground">
-            Selecciona una reimpresión para ver su histórico y precios.
-          </p>
-        </div>
-        <div className="w-full sm:w-80">
-          <Select
-            value={effectiveSelectedId}
-            onValueChange={(id) => {
-              if (onSelectPrinting) onSelectPrinting(id);
-              else setLocalSelectedId(id);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona una impresión" />
-            </SelectTrigger>
-            <SelectContent>
-              {printings.map((p) => (
-                <SelectItem key={p.card_printing_id} value={p.card_printing_id}>
-                  {editionDisplayName(p.edition.name)}
-                  {p.collector_number ? ` — #${p.collector_number}` : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
 
       {selected ? (
         <>
@@ -315,11 +290,9 @@ export function CardDetailPrices({
                 {selected.rarity_tier.name}
               </Badge>
             )}
-            {selected.printing_variant !== 'standard' && (
-              <Badge variant="outline" className="text-xs">
-                {selected.printing_variant}
-              </Badge>
-            )}
+            <Badge variant="outline" className="text-xs">
+              {selected.printing_variant?.trim() || 'standard'}
+            </Badge>
           </div>
 
           {/* Price section (stores + community) */}

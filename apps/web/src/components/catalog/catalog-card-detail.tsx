@@ -86,11 +86,7 @@ export function CatalogCardDetail({
         </Button>
 
         <div className="flex items-center gap-2">
-          {selectedPrinting ? (
-            <Badge variant="outline" className="text-xs">
-              {editionDisplayName(selectedPrinting.edition.name)}
-            </Badge>
-          ) : null}
+
           {isAdmin ? (
             <Button
               variant="outline"

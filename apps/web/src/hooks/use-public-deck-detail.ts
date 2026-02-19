@@ -3,6 +3,7 @@
  *
  * Changelog:
  *   2026-02-18 — Creación inicial
+ *   2026-02-19 — Agrega `edition` y `race` resueltos por nombre para UI pública.
  */
 
 'use client';
@@ -25,6 +26,8 @@ interface PublicDeckDetail {
   updated_at: string;
   author: { user_id: string; display_name: string | null; avatar_url: string | null };
   format: { format_id: string; name: string; code: string } | null;
+  edition: { edition_id: string; name: string; code: string | null } | null;
+  race: { race_id: string; name: string } | null;
   cards: unknown[];
   strategy: unknown[];
   viewer_has_liked: boolean;

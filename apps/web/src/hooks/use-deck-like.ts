@@ -3,11 +3,12 @@
  *
  * Changelog:
  *   2026-02-18 — Creación inicial
+ *   2026-02-19 — Bugfix: sincroniza estado local cuando cambian props iniciales.
  */
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 interface UseDeckLikeResult {
   hasLiked: boolean;
@@ -24,6 +25,14 @@ export function useDeckLike(
   const [hasLiked, setHasLiked] = useState(initialHasLiked);
   const [likeCount, setLikeCount] = useState(initialLikeCount);
   const [isToggling, setIsToggling] = useState(false);
+
+  useEffect(() => {
+    setHasLiked(initialHasLiked);
+  }, [initialHasLiked, deckId]);
+
+  useEffect(() => {
+    setLikeCount(initialLikeCount);
+  }, [initialLikeCount, deckId]);
 
   const toggleLike = useCallback(async () => {
     setIsToggling(true);

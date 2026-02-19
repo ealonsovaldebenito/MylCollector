@@ -5,6 +5,8 @@
  * Changelog:
  *   2026-02-18 — Creación inicial
  *   2026-02-18 — Enriquecimiento CARDSD para galería: portada, cartas clave, coste promedio, raza y edición.
+ *   2026-02-19 — Detalle público enriquecido con nombres de edición/raza + variante de impresión.
+ *   2026-02-19 — Bugfix: el coste promedio de CARDSD excluye cartas de Oro.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -188,11 +190,15 @@ async function buildDeckCardsDSummaries(
     }
 
     const cardType = card?.card_type_id ? cardTypeById.get(card.card_type_id) : null;
-    if (!row.is_starting_gold && !isGoldType(cardType?.code, cardType?.name)) {
-      if (typeof card?.cost === 'number' && Number.isFinite(card.cost) && card.cost > 0) {
-        totals.costSum += card.cost * qty;
-        totals.costCount += qty;
-      }
+    const isGold = isGoldType(cardType?.code, cardType?.name);
+    const resolvedCost =
+      typeof card?.cost === 'number' && Number.isFinite(card.cost)
+        ? card.cost
+        : null;
+
+    if (!isGold && resolvedCost !== null) {
+      totals.costSum += resolvedCost * qty;
+      totals.costCount += qty;
     }
 
     if (printing?.edition_id) {
@@ -401,6 +407,9 @@ export async function getPublicDeckDetail(
     .single();
 
   let cards: unknown[] = [];
+  const editionVotes = new Map<string, number>();
+  const raceVotes = new Map<string, number>();
+
   if (latestVersion) {
     const { data: versionCards } = await supabase
       .from('deck_version_cards')
@@ -422,14 +431,16 @@ export async function getPublicDeckDetail(
           image_url,
           edition_id,
           card_id,
-          rarity_tier_id
+          rarity_tier_id,
+          printing_variant,
+          edition:editions(edition_id, name, code)
         `)
         .in('card_printing_id', printingIds);
 
       const cardIds = [...new Set((printings ?? []).map((p) => p.card_id))];
       const { data: cardData } = await supabase
         .from('cards')
-        .select('card_id, name, card_type_id, cost, ally_strength, race_id, card_type:card_types(name, code)')
+        .select('card_id, name, card_type_id, cost, ally_strength, race_id, card_type:card_types(name, code), race:races(race_id, name)')
         .in('card_id', cardIds);
 
       const cardMap = new Map((cardData ?? []).map((c) => [c.card_id, c]));
@@ -438,6 +449,18 @@ export async function getPublicDeckDetail(
       cards = versionCards.map((vc) => {
         const printing = printingMap.get(vc.card_printing_id);
         const card = printing ? cardMap.get(printing.card_id) : null;
+        const qty = Math.max(1, vc.qty ?? 1);
+
+        if (printing?.edition_id) {
+          editionVotes.set(
+            printing.edition_id,
+            (editionVotes.get(printing.edition_id) ?? 0) + qty,
+          );
+        }
+        if (card?.race_id) {
+          raceVotes.set(card.race_id, (raceVotes.get(card.race_id) ?? 0) + qty);
+        }
+
         return {
           ...vc,
           printing: printing ?? null,
@@ -446,6 +469,26 @@ export async function getPublicDeckDetail(
       });
     }
   }
+
+  const resolvedEditionId = deck.edition_id ?? pickMostFrequentId(editionVotes);
+  const resolvedRaceId = deck.race_id ?? pickMostFrequentId(raceVotes);
+
+  const [{ data: edition }, { data: race }] = await Promise.all([
+    resolvedEditionId
+      ? supabase
+        .from('editions')
+        .select('edition_id, name, code')
+        .eq('edition_id', resolvedEditionId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    resolvedRaceId
+      ? supabase
+        .from('races')
+        .select('race_id, name')
+        .eq('race_id', resolvedRaceId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
 
   // Strategy sections
   const { data: strategy } = await supabase
@@ -466,10 +509,18 @@ export async function getPublicDeckDetail(
     viewerHasLiked = !!like;
   }
 
+  const authorDisplayName = author?.display_name ?? 'Usuario';
+
   return {
     ...deck,
-    author: author ?? { user_id: deck.user_id, display_name: 'Usuario', avatar_url: null },
+    author: {
+      user_id: deck.user_id,
+      display_name: authorDisplayName,
+      avatar_url: author?.avatar_url ?? null,
+    },
     format: format ?? null,
+    edition: edition ?? null,
+    race: race ?? null,
     cards,
     strategy: strategy ?? [],
     viewer_has_liked: viewerHasLiked,
